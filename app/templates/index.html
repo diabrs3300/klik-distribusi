@@ -263,9 +263,10 @@
     {% if messages %}
     <div class="container pt-3">
         {% for category, message in messages %}
-        <div class="alert alert-{{ category }} alert-dismissible fade show py-2 pe-5" role="alert">
-            <i class="bi bi-check-circle-fill me-2"></i>{{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <div class="alert alert-{{ category }} fade show d-flex align-items-center justify-content-between gap-3 py-2 mb-2"
+            role="alert">
+            <span><i class="bi bi-check-circle-fill me-2"></i>{{ message }}</span>
+            <button type="button" class="btn-close flex-shrink-0" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
         {% endfor %}
     </div>

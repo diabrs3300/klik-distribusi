@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="auth-box">
+    <h2>Daftar Akun</h2>
+    <form method="POST" action="">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.username.label }}
+            {{ form.username(class="form-control", placeholder="Username") }}
+            {% for error in form.username.errors %}<span class="error">{{ error }}</span>{% endfor %}
+        </div>
+        <div class="form-group">
+            {{ form.email.label }}
+            {{ form.email(class="form-control", placeholder="email@contoh.com") }}
+            {% for error in form.email.errors %}<span class="error">{{ error }}</span>{% endfor %}
+        </div>
+        <div class="form-group">
+            {{ form.password.label }}
+            {{ form.password(class="form-control", placeholder="Min. 8 karakter") }}
+            {% for error in form.password.errors %}<span class="error">{{ error }}</span>{% endfor %}
+        </div>
+        <div class="form-group">
+            {{ form.confirm_password.label }}
+            {{ form.confirm_password(class="form-control", placeholder="Ulangi password") }}
+            {% for error in form.confirm_password.errors %}<span class="error">{{ error }}</span>{% endfor %}
+        </div>
+        {{ form.submit(class="btn btn-primary btn-block") }}
+    </form>
+    <p>Sudah punya akun? <a href="{{ url_for('auth.login') }}">Login</a></p>
+</div>
+{% endblock %}

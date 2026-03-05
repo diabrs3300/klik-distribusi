@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid px-4">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h2 class="fw-bold mb-0">Dashboard</h2>
+            <p class="text-muted mb-0">Selamat datang, <strong>{{ current_user.nama }}</strong>. Pilih menu BRS di
+                bawah.</p>
+        </div>
+        <span class="badge bg-primary-subtle text-primary px-3 py-2 rounded-pill">
+            <i class="bi bi-calendar3 me-1"></i>BRS Jawa Tengah
+        </span>
+    </div>
+
+    <!-- BRS Card Grid -->
+    <div class="row g-4">
+
+        <!-- 1. IHK / Inflasi -->
+        <div class="col-md-6 col-xl-4">
+            <a href="{{ url_for('main.brs_ihk') }}" class="text-decoration-none">
+                <div class="card brs-card h-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="brs-icon-wrap bg-danger-subtle text-danger mb-3">
+                            <i class="bi bi-graph-up-arrow fs-3"></i>
+                        </div>
+                        <h5 class="card-title fw-bold">BRS IHK-Inflasi</h5>
+                        <p class="card-text text-muted small">Berita Resmi Statistik Indeks Harga Konsumen dan Inflasi
+                            Jawa Tengah.</p>
+                        <span class="badge bg-danger-subtle text-danger mt-1">6 Dokumen</span>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 pb-3 px-4">
+                        <span class="text-primary small fw-semibold">Lihat Detail <i
+                                class="bi bi-arrow-right"></i></span>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 2. NTP dan Gabah -->
+        <div class="col-md-6 col-xl-4">
+            <a href="{{ url_for('main.brs_ntp') }}" class="text-decoration-none">
+                <div class="card brs-card h-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="brs-icon-wrap bg-success-subtle text-success mb-3">
+                            <i class="bi bi-tree fs-3"></i>
+                        </div>
+                        <h5 class="card-title fw-bold">BRS NTP dan Gabah</h5>
+                        <p class="card-text text-muted small">Berita Resmi Statistik Nilai Tukar Petani dan Harga Gabah
+                            Jawa Tengah.</p>
+                        <span class="badge bg-success-subtle text-success mt-1">9 Dokumen</span>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 pb-3 px-4">
+                        <span class="text-primary small fw-semibold">Lihat Detail <i
+                                class="bi bi-arrow-right"></i></span>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 3. Transportasi -->
+        <div class="col-md-6 col-xl-4">
+            <a href="{{ url_for('main.brs_transportasi') }}" class="text-decoration-none">
+                <div class="card brs-card h-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="brs-icon-wrap bg-warning-subtle text-warning mb-3">
+                            <i class="bi bi-truck fs-3"></i>
+                        </div>
+                        <h5 class="card-title fw-bold">BRS Transportasi</h5>
+                        <p class="card-text text-muted small">Berita Resmi Statistik Perkembangan Transportasi Jawa
+                            Tengah.</p>
+                        <span class="badge bg-warning-subtle text-warning mt-1">7 Dokumen</span>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 pb-3 px-4">
+                        <span class="text-primary small fw-semibold">Lihat Detail <i
+                                class="bi bi-arrow-right"></i></span>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 4. Ekspor Impor -->
+        <div class="col-md-6 col-xl-4">
+            <a href="{{ url_for('main.brs_ekspor') }}" class="text-decoration-none">
+                <div class="card brs-card h-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="brs-icon-wrap bg-info-subtle text-info mb-3">
+                            <i class="bi bi-globe-americas fs-3"></i>
+                        </div>
+                        <h5 class="card-title fw-bold">BRS Ekspor Impor</h5>
+                        <p class="card-text text-muted small">Berita Resmi Statistik Perkembangan Ekspor dan Impor Jawa
+                            Tengah.</p>
+                        <span class="badge bg-info-subtle text-info mt-1">8 Dokumen</span>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 pb-3 px-4">
+                        <span class="text-primary small fw-semibold">Lihat Detail <i
+                                class="bi bi-arrow-right"></i></span>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 5. Pariwisata -->
+        <div class="col-md-6 col-xl-4">
+            <a href="{{ url_for('main.brs_pariwisata') }}" class="text-decoration-none">
+                <div class="card brs-card h-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="brs-icon-wrap bg-purple-subtle text-purple mb-3">
+                            <i class="bi bi-airplane fs-3"></i>
+                        </div>
+                        <h5 class="card-title fw-bold">BRS Pariwisata</h5>
+                        <p class="card-text text-muted small">Berita Resmi Statistik Perkembangan Pariwisata Jawa
+                            Tengah.</p>
+                        <span class="badge bg-purple-subtle text-purple mt-1">7 Dokumen</span>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 pb-3 px-4">
+                        <span class="text-primary small fw-semibold">Lihat Detail <i
+                                class="bi bi-arrow-right"></i></span>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+    </div><!-- /row -->
+</div>
+{% endblock %}

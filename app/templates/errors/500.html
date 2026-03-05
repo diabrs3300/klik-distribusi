@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}500 - Server Error{% endblock %}
+{% block content %}
+<div class="error-page">
+    <h1>500</h1>
+    <p>Terjadi kesalahan pada server. Silakan coba lagi nanti.</p>
+    <a href="{{ url_for('main.index') }}" class="btn btn-primary">Kembali ke Beranda</a>
+</div>
+{% endblock %}

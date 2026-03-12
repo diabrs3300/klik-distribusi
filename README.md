@@ -189,6 +189,26 @@ Untuk memaksa refresh data tanpa menunggu TTL:
 
 ---
 
+## Layanan Sinkronisasi Google Sheets (`app/services/sheets.py`)
+
+Aplikasi ini menggunakan modul terpusat `sheets.py` untuk mengelola koneksi dan operasi CRUD (*Create, Read, Update, Delete*) data dari dan ke Google Sheets API via autentikasi *Service Account*. 
+
+Proses sinkronisasi data dipetah menjadi beberapa fungsi utama:
+
+- **`_get_spreadsheet(spreadsheet_id)`**
+  Pengelola otentikasi sentral. Mengambil kredensial klien *Service Account* (dari *environtment variables* atau `credentials.json`) dan membuka akses langsung ke Spreadsheet target.
+  
+- **`process_ihk_upload(dataframe, col_name)`**
+  Mengorkestrasi seluruh sinkronisasi pengunggahan data **IHK**. Membaca file DataFrame (dari Excel) dan melakukan pembaruan lintas sheet secara *batching* sesuai pemetaan parameter dari BPS (misal ke sheet: *MTM*, *YTD*, *YOY*, dsb).
+  
+- **`process_ekspor_upload(dataframe)`**
+  Mengorkestrasi sinkronisasi data agregasi **Ekspor**. Mengelompokkan nominal agregat (*sum*) **FOB** berdasarkan parameter *KODE_HS*, *PODAL5*, dan *NEWCTRYCOD* lalu mendistribusikannya ke sheet target masing-masing (*Barang*, *Pelabuhan*, *Negara*). Fungsi ini otomatis menambahkan header kolom periode *YYMM* baru (*auto-expanding*) jika periode belum terdaftar.
+
+- **`_upsert_ihk_sheet` & `_upsert_ekspor_sheet`**
+  Fungsi utilitas spesifik yang secara harfiah menangani manipulasi baris dan sel data mentah ke *worksheet*. Bertugas memetakan baris referensi via referensi silang (*lookup dict*), melakukan pembaruan *cell* (*update value*), dan/atau menempelkan baris ekstraksi jika item / komoditas tersebut belum ada sebelumnya (*appending row*).
+
+---
+
 ## Dependencies
 
 | Package | Kegunaan |

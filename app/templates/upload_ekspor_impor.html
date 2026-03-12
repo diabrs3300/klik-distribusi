@@ -1,0 +1,503 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid px-4">
+
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('main.dia_brs') }}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('main.brs_ekspor') }}">BRS Ekspor Impor</a></li>
+            <li class="breadcrumb-item active">Upload DBF</li>
+        </ol>
+    </nav>
+
+    <!-- ── Hasil Upload (muncul di atas setelah submit, mirip IHK) ── -->
+    {% if stats %}
+    <div id="statsCard" class="card shadow-sm border-0 border-start border-4 mb-4"
+        style="border-color:#0d9488 !important;">
+        <div class="card-body py-3 px-4">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <i class="bi bi-check-circle-fill fs-5" style="color:#0d9488;"></i>
+                <div class="flex-grow-1">
+                    <strong>Upload Berhasil!</strong>
+                    Data Ekspor telah disinkronkan ke Google Sheets &mdash;
+                    <span style="color:#0d9488;" class="fw-semibold">{{ stats.inserted }} baris baru</span>,
+                    <span class="text-primary fw-semibold">{{ stats.updated }} baris diperbarui</span>.
+                </div>
+                <button class="btn btn-sm btn-outline-success fw-semibold" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#uploadDetail" id="detailToggleBtn">
+                    <i class="bi bi-chevron-down me-1"></i>Lihat Detail
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="statsCloseBtn" title="Tutup">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+
+            <div class="collapse mt-3" id="uploadDetail">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <div class="text-center p-3 rounded" style="background-color:#f0fdfa;">
+                            <div class="fs-2 fw-bold" style="color:#0d9488;">{{ stats.inserted }}</div>
+                            <div class="small text-muted">Baris Baru</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="text-center p-3 bg-primary-subtle rounded">
+                            <div class="fs-2 fw-bold text-primary">{{ stats.updated }}</div>
+                            <div class="small text-muted">Baris Diperbarui</div>
+                        </div>
+                    </div>
+                </div>
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Sheet / Group</th>
+                            <th class="text-center">Baris Baru</th>
+                            <th class="text-center">Diperbarui</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for d in stats.details %}
+                        <tr>
+                            <td><code>{{ d.sheet }}</code></td>
+                            <td class="text-center"><span class="badge bg-success-subtle text-success">{{ d.inserted
+                                    }}</span></td>
+                            <td class="text-center"><span class="badge bg-primary-subtle text-primary">{{ d.updated
+                                    }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Header -->
+    <div class="detail-header mb-4 p-4 rounded-3" style="background-color:#f0fdfa;">
+        <div class="d-flex align-items-center gap-3">
+            <div class="brs-icon-wrap-lg text-white"
+                style="background-color:#0d9488; border-radius:12px; width:56px; height:56px; display:flex; align-items:center; justify-content:center;">
+                <i class="bi bi-cloud-arrow-up fs-2"></i>
+            </div>
+            <div>
+                <h3 class="fw-bold mb-1">Upload Data Ekspor-Impor</h3>
+                <p class="mb-0 text-muted">
+                    Upload file DBF data mentah Ekspor dan Impor Jawa Tengah.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Nav Tabs -->
+    <ul class="nav nav-tabs mb-0 border-bottom-0" id="uploadTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fw-semibold {% if active_tab != 'impor' %}active{% endif %}" id="tab-ekspor"
+                data-bs-toggle="tab" data-bs-target="#pane-ekspor" type="button" role="tab" style="color:#0d9488;">
+                <i class="bi bi-box-arrow-up-right me-2"></i>Upload Ekspor
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fw-semibold {% if active_tab == 'impor' %}active{% endif %}" id="tab-impor"
+                data-bs-toggle="tab" data-bs-target="#pane-impor" type="button" role="tab" style="color:#1d4ed8;">
+                <i class="bi bi-box-arrow-in-down-left me-2"></i>Upload Impor
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content border border-top-0 rounded-bottom p-0 shadow-sm mb-4" id="uploadTabContent">
+
+        <!-- ═══════════════════ TAB EKSPOR ═══════════════════ -->
+        <div class="tab-pane fade {% if active_tab != 'impor' %}show active{% endif %}" id="pane-ekspor"
+            role="tabpanel">
+            <div class="p-4">
+
+                {% if last_upload and last_upload.type == 'Ekspor' and not stats %}
+                <div class="card border-0 border-start border-4 mb-4"
+                    style="border-color:#0d9488 !important; background:#f0fdfa;">
+                    <div class="card-body py-3 px-4 d-flex align-items-center gap-3">
+                        <i class="bi bi-check-circle-fill fs-4" style="color:#0d9488;"></i>
+                        <div>
+                            <strong>File Ekspor berhasil dibaca!</strong>
+                            <span class="text-muted ms-2">{{ last_upload.rows }} baris terdeteksi — semua kolom wajib
+                                ditemukan.</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="row g-4">
+                    <!-- Form -->
+                    <div class="col-lg-7">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-white py-3 px-4 border-bottom">
+                                <h6 class="fw-bold mb-0">
+                                    <i class="bi bi-upload me-2" style="color:#0d9488;"></i>Form Upload Ekspor
+                                </h6>
+                            </div>
+                            <div class="card-body p-4">
+                                <form method="POST" enctype="multipart/form-data" id="formEkspor">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                                    <input type="hidden" name="form_type" value="ekspor" />
+
+                                    <div class="mb-4">
+                                        <label for="fileEkspor" class="form-label fw-semibold">
+                                            File Upload (DBF / Excel) <span class="text-danger">*</span>
+                                        </label>
+                                        <input type="file" id="fileEkspor" name="file" class="form-control"
+                                            accept=".dbf,.xlsx,.xls" required />
+                                        <div class="form-text">Hanya file <code>.dbf</code>, <code>.xlsx</code>, atau
+                                            <code>.xls</code>.
+                                        </div>
+                                    </div>
+
+                                    <!-- Progress Ekspor -->
+                                    <div id="progressContainerEkspor" class="mb-3 d-none">
+                                        <div class="d-flex justify-content-between mb-1">
+                                            <span class="small fw-semibold text-primary" id="progressTextEkspor">Memulai
+                                                upload...</span>
+                                            <span class="small fw-bold text-primary"
+                                                id="progressPercentEkspor">0%</span>
+                                        </div>
+                                        <div class="progress" style="height: 10px;">
+                                            <div id="progressBarEkspor"
+                                                class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                                                role="progressbar" style="width: 0%;" aria-valuenow="0"
+                                                aria-valuemin="0" aria-valuemax="100"></div>
+                                        </div>
+                                    </div>
+
+                                    <button type="submit" class="btn fw-semibold px-4 py-2 text-white" id="btnEkspor"
+                                        style="background-color:#0d9488;">
+                                        <span id="btnEksporText">
+                                            <i class="bi bi-cloud-upload me-2"></i>Upload Data Ekspor
+                                        </span>
+                                        <span id="btnEksporSpin" class="d-none">
+                                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                            Sedang memproses...
+                                        </span>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Info Card Ekspor -->
+                    <div class="col-lg-5">
+                        <div class="card shadow-sm border-0 h-100">
+                            <div class="card-header bg-white py-3 px-4 border-bottom">
+                                <h6 class="fw-bold mb-0">
+                                    <i class="bi bi-info-circle me-2 text-info"></i>Kolom Wajib — Ekspor
+                                </h6>
+                            </div>
+                            <div class="card-body p-4">
+                                <p class="text-muted small mb-2"><strong>File DBF</strong> harus memiliki kolom:</p>
+                                <div class="d-flex flex-wrap gap-1 mb-3">
+                                    {% for col in
+                                    ['YEAR','MTH','KODE_HS','PEL_MUAT','PODAL5','NGRTUJUAN','NEWCTRYCOD','NETTO','ORIG2','PROVORIG']
+                                    %}
+                                    <span class="badge rounded-pill px-2 py-1"
+                                        style="background-color:#ccfbf1;color:#0d9488;font-size:0.75rem;">{{ col
+                                        }}</span>
+                                    {% endfor %}
+                                </div>
+
+                                <p class="text-muted small mb-2"><strong>File Excel</strong> wajib memiliki kolom:</p>
+                                <div class="d-flex flex-wrap gap-1">
+                                    {% for col in
+                                    ['BLN_PROSES','THN_PROSES','PROVPOD','PELABUHAN','KODE_HS','NEGARA','NETTO']
+                                    %}
+                                    <span class="badge rounded-pill px-2 py-1"
+                                        style="background-color:#ccfbf1;color:#0d9488;font-size:0.75rem;">{{ col
+                                        }}</span>
+                                    {% endfor %}
+                                </div>
+                                <!-- Template removed for DBF -->
+                            </div>
+                        </div>
+                    </div>
+                </div><!-- /row ekspor -->
+            </div>
+        </div><!-- /tab-pane ekspor -->
+
+
+        <!-- ═══════════════════ TAB IMPOR ═══════════════════ -->
+        <div class="tab-pane fade {% if active_tab == 'impor' %}show active{% endif %}" id="pane-impor" role="tabpanel">
+            <div class="p-4">
+
+                {% if last_upload and last_upload.type == 'Impor' %}
+                <div class="card border-0 border-start border-4 mb-4"
+                    style="border-color:#1d4ed8 !important; background:#eff6ff;">
+                    <div class="card-body py-3 px-4 d-flex align-items-center gap-3">
+                        <i class="bi bi-check-circle-fill fs-4 text-primary"></i>
+                        <div>
+                            <strong>File Impor berhasil dibaca!</strong>
+                            <span class="text-muted ms-2">{{ last_upload.rows }} baris terdeteksi — semua kolom wajib
+                                ditemukan.</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="row g-4">
+                    <!-- Form -->
+                    <div class="col-lg-7">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-white py-3 px-4 border-bottom">
+                                <h6 class="fw-bold mb-0">
+                                    <i class="bi bi-upload me-2 text-primary"></i>Form Upload Impor
+                                </h6>
+                            </div>
+                            <div class="card-body p-4">
+                                <form method="POST" enctype="multipart/form-data" id="formImpor">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                                    <input type="hidden" name="form_type" value="impor" />
+
+                                    <div class="mb-4">
+                                        <label for="fileImpor" class="form-label fw-semibold">
+                                            File Upload (DBF / Excel) <span class="text-danger">*</span>
+                                        </label>
+                                        <input type="file" id="fileImpor" name="file" class="form-control"
+                                            accept=".dbf,.xlsx,.xls" required />
+                                        <div class="form-text">Hanya file <code>.dbf</code>, <code>.xlsx</code>, atau
+                                            <code>.xls</code>.
+                                        </div>
+                                    </div>
+
+                                    <div class="row g-3 mb-4" id="imporBulanTahunGroup">
+                                        <div class="col-md-6">
+                                            <label for="imporBulan" class="form-label fw-semibold">Bulan (Hanya DBF)
+                                                <span class="text-danger">*</span></label>
+                                            <select class="form-select" id="imporBulan" name="bulan">
+                                                <option value="" disabled selected>Pilih Bulan</option>
+                                                {% for i, m in
+                                                [(1,'Januari'),(2,'Februari'),(3,'Maret'),(4,'April'),(5,'Mei'),(6,'Juni'),(7,'Juli'),(8,'Agustus'),(9,'September'),(10,'Oktober'),(11,'November'),(12,'Desember')]
+                                                %}
+                                                <option value="{{ i }}">{{ m }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="imporTahun" class="form-label fw-semibold">Tahun (Hanya DBF)
+                                                <span class="text-danger">*</span></label>
+                                            <input type="number" class="form-control" id="imporTahun" name="tahun"
+                                                placeholder="Contoh: 2026" min="2000" max="2100">
+                                        </div>
+                                    </div>
+
+                                    <!-- Progress Impor -->
+                                    <div id="progressContainerImpor" class="mb-3 d-none">
+                                        <div class="d-flex justify-content-between mb-1">
+                                            <span class="small fw-semibold text-primary" id="progressTextImpor">Memulai
+                                                upload...</span>
+                                            <span class="small fw-bold text-primary" id="progressPercentImpor">0%</span>
+                                        </div>
+                                        <div class="progress" style="height: 10px;">
+                                            <div id="progressBarImpor"
+                                                class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                                                role="progressbar" style="width: 0%;" aria-valuenow="0"
+                                                aria-valuemin="0" aria-valuemax="100"></div>
+                                        </div>
+                                    </div>
+
+                                    <button type="submit" class="btn btn-primary fw-semibold px-4 py-2" id="btnImpor">
+                                        <span id="btnImporText">
+                                            <i class="bi bi-cloud-upload me-2"></i>Upload Data Impor
+                                        </span>
+                                        <span id="btnImporSpin" class="d-none">
+                                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                            Sedang memproses...
+                                        </span>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Info Card Impor -->
+                    <div class="col-lg-5">
+                        <div class="card shadow-sm border-0 h-100">
+                            <div class="card-header bg-white py-3 px-4 border-bottom">
+                                <h6 class="fw-bold mb-0">
+                                    <i class="bi bi-info-circle me-2 text-info"></i>Kolom Wajib — Impor
+                                </h6>
+                            </div>
+                            <div class="card-body p-4">
+                                <p class="text-muted small mb-2"><strong>File DBF</strong> harus memiliki kolom:</p>
+                                <div class="d-flex flex-wrap gap-1 mb-3">
+                                    {% for col in
+                                    ['HS','K_NEGARA','N1225']
+                                    %}
+                                    <span class="badge rounded-pill px-2 py-1 bg-primary-subtle text-primary"
+                                        style="font-size:0.75rem;">{{ col }}</span>
+                                    {% endfor %}
+                                </div>
+                                <p class="text-muted small mb-0"><i
+                                        class="bi bi-exclamation-triangle-fill text-warning me-1"></i> Jika upload DBF,
+                                    input <strong>Bulan</strong> dan <strong>Tahun</strong> wajib diisi.</p>
+
+                                <hr class="my-3 text-muted">
+
+                                <p class="text-muted small mb-2"><strong>File Excel</strong> wajib memiliki kolom:</p>
+                                <div class="d-flex flex-wrap gap-1 mb-2">
+                                    {% for col in
+                                    ['BLN','THN_PROSES','KODE_HS','NEGARA','NILAI']
+                                    %}
+                                    <span class="badge rounded-pill px-2 py-1 bg-primary-subtle text-primary"
+                                        style="font-size:0.75rem;">{{ col }}</span>
+                                    {% endfor %}
+                                </div>
+                                <p class="text-muted small mb-0"><i class="bi bi-info-circle-fill text-info me-1"></i>
+                                    Jika upload Excel, <strong>Tahun</strong> & <strong>Bulan</strong> akan dibaca
+                                    otomatis dari file.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div><!-- /row impor -->
+            </div>
+        </div><!-- /tab-pane impor -->
+
+    </div><!-- /tab-content -->
+
+    <div class="mt-1">
+        <a href="{{ url_for('main.brs_ekspor') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Kembali ke BRS Ekspor Impor
+        </a>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function handleUploadWithProgress(formId, btnId, textId, spinId, progressContainerId, progressBarId, progressTextId, progressPercentId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const btn = document.getElementById(btnId);
+            const text = document.getElementById(textId);
+            const spin = document.getElementById(spinId);
+
+            const progressContainer = document.getElementById(progressContainerId);
+            const progressBar = document.getElementById(progressBarId);
+            const pText = document.getElementById(progressTextId);
+            const pPercent = document.getElementById(progressPercentId);
+
+            btn.disabled = true;
+            text.classList.add('d-none');
+            spin.classList.remove('d-none');
+
+            progressContainer.classList.remove('d-none');
+            progressBar.style.width = '0%';
+            progressBar.setAttribute('aria-valuenow', 0);
+            pPercent.textContent = '0%';
+            pText.textContent = 'Menyiapkan file...';
+
+            const taskId = 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+
+            const formData = new FormData(this);
+            formData.append('task_id', taskId);
+
+            const pollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/upload-progress/${taskId}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        progressBar.style.width = data.percent + '%';
+                        progressBar.setAttribute('aria-valuenow', data.percent);
+                        pPercent.textContent = data.percent + '%';
+                        if (data.message) {
+                            pText.textContent = data.message;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Gagal polling progress:', err);
+                }
+            }, 1000);
+
+            try {
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+
+                clearInterval(pollInterval);
+                const html = await response.text();
+
+                document.open();
+                document.write(html);
+                document.close();
+
+            } catch (error) {
+                clearInterval(pollInterval);
+                alert('Terjadi kesalahan koneksi saat mengupload file.');
+                btn.disabled = false;
+                text.classList.remove('d-none');
+                spin.classList.add('d-none');
+                progressContainer.classList.add('d-none');
+            }
+        });
+    }
+
+    handleUploadWithProgress('formEkspor', 'btnEkspor', 'btnEksporText', 'btnEksporSpin', 'progressContainerEkspor', 'progressBarEkspor', 'progressTextEkspor', 'progressPercentEkspor');
+    handleUploadWithProgress('formImpor', 'btnImpor', 'btnImporText', 'btnImporSpin', 'progressContainerImpor', 'progressBarImpor', 'progressTextImpor', 'progressPercentImpor');
+
+    // Scripts for Stats Card (mirip IHK)
+    const detailEl = document.getElementById('uploadDetail');
+    const toggleBtn = document.getElementById('detailToggleBtn');
+    if (detailEl && toggleBtn) {
+        detailEl.addEventListener('show.bs.collapse', function () {
+            toggleBtn.innerHTML = '<i class="bi bi-chevron-up me-1"></i>Sembunyikan';
+        });
+        detailEl.addEventListener('hide.bs.collapse', function () {
+            toggleBtn.innerHTML = '<i class="bi bi-chevron-down me-1"></i>Lihat Detail';
+        });
+    }
+
+    const closeBtn = document.getElementById('statsCloseBtn');
+    const statsCard = document.getElementById('statsCard');
+    if (closeBtn && statsCard) {
+        closeBtn.addEventListener('click', function () {
+            statsCard.style.transition = 'opacity .3s';
+            statsCard.style.opacity = '0';
+            setTimeout(function () { statsCard.style.display = 'none'; }, 300);
+        });
+    }
+
+    // Toggle logic for Impor File (DBF vs Excel)
+    const fileImpor = document.getElementById('fileImpor');
+    const imporBulanTahunGroup = document.getElementById('imporBulanTahunGroup');
+    const imporBulan = document.getElementById('imporBulan');
+    const imporTahun = document.getElementById('imporTahun');
+
+    if (fileImpor) {
+        fileImpor.addEventListener('change', function (e) {
+            const fileName = e.target.value.toLowerCase();
+            if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                // Hide and non-require Bulan/Tahun for Excel
+                imporBulanTahunGroup.style.display = 'none';
+                imporBulan.removeAttribute('required');
+                imporTahun.removeAttribute('required');
+            } else if (fileName.endsWith('.dbf')) {
+                // Show and require Bulan/Tahun for DBF
+                imporBulanTahunGroup.style.display = 'flex';
+                imporBulan.setAttribute('required', 'required');
+                imporTahun.setAttribute('required', 'required');
+            } else {
+                // Default fallback
+                imporBulanTahunGroup.style.display = 'flex';
+                imporBulan.removeAttribute('required');
+                imporTahun.removeAttribute('required');
+            }
+        });
+
+        // Trigger manually on load in case browser retains value
+        fileImpor.dispatchEvent(new Event('change'));
+    }
+</script>
+{% endblock %}

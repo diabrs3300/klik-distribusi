@@ -112,6 +112,14 @@ REQUIRED_EXCEL_COLS = [
     'Andil MtM', 'Andil YtD', 'Andil YoY',
 ]
 
+# ─── Progress Tracker API ─────────────────────────────────────────────────────
+
+@main.route('/upload-progress/<task_id>')
+@login_required
+def upload_progress(task_id):
+    from app.services.sheets import get_progress
+    from flask import jsonify
+    return jsonify(get_progress(task_id))
 
 @main.route('/upload-ihk', methods=['GET', 'POST'])
 @login_required
@@ -122,6 +130,7 @@ def upload_ihk():
     # ── Ambil input form ──────────────────────────────────────────────────────
     bulan  = request.form.get('bulan', '').strip()
     tahun  = request.form.get('tahun', '').strip()
+    task_id = request.form.get('task_id', '').strip()
     file   = request.files.get('file')
 
     # ── Validasi ──────────────────────────────────────────────────────────────
@@ -202,8 +211,11 @@ def upload_ihk():
 
     # ── Proses ke Google Sheets ───────────────────────────────────────────────
     try:
-        from app.services.sheets import process_upload
-        stats = process_upload(df, col_name)
+        from app.services.sheets import process_ihk_upload, clear_progress
+        stats = process_ihk_upload(df, col_name, task_id=task_id)
+
+        if stats['inserted'] == 0 and stats['updated'] == 0:
+            flash('File berhasil dibaca, namun tidak ada baris data yang valid untuk di-upload.', 'warning')
     except FileNotFoundError:
         flash(
             'File credentials.json tidak ditemukan. '
@@ -216,6 +228,9 @@ def upload_ihk():
         return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     # ── Sukses — langsung render dengan stats (tanpa flash duplikat) ──────────
+    if task_id:
+        clear_progress(task_id)
+        
     return render_template(
         'upload_ihk.html',
         title='Upload Excel IHK-Inflasi',
@@ -313,4 +328,366 @@ def download_template_ihk():
         download_name='template_ihk_inflasi.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
+
+
+# ─── Upload Ekspor-Impor ───────────────────────────────────────────────────────
+
+REQUIRED_EKSPOR_COLS = [
+    'YEAR', 'MTH', 'KODE_HS', 'PEL_MUAT', 'PODAL5',
+    'NGRTUJUAN', 'NEWCTRYCOD', 'NETTO', 'FOB', 'ORIG2', 'PROVORIG',
+]
+
+REQUIRED_IMPOR_COLS = [
+    'HS', 'K_NEGARA', 'N1225',
+]
+
+REQUIRED_IMPOR_EXCEL_COLS = [
+    'BLN', 'THN_PROSES', 'KODE_HS', 'NEGARA', 'NILAI'
+]
+
+REQUIRED_EKSPOR_EXCEL_COLS = [
+    'BLN_PROSES', 'THN_PROSES', 'PROVPOD', 'PELABUHAN', 
+    'KODE_HS', 'NEGARA', 'NETTO', 'FOB'
+]
+
+
+@main.route('/upload-ekspor-impor', methods=['GET', 'POST'])
+@login_required
+def upload_ekspor_impor():
+    if request.method == 'GET':
+        return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor')
+
+    form_type = request.form.get('form_type', '').strip()  # 'ekspor' atau 'impor'
+    task_id   = request.form.get('task_id', '').strip()
+    file      = request.files.get('file')
+
+    # ── Tentukan kolom wajib & label berdasarkan form_type ──────────────────
+    if form_type == 'ekspor':
+        required_cols = REQUIRED_EKSPOR_COLS
+        label         = 'Ekspor'
+        active_tab    = 'ekspor'
+    elif form_type == 'impor':
+        required_cols = REQUIRED_IMPOR_COLS
+        label         = 'Impor'
+        active_tab    = 'impor'
+    else:
+        flash('Tipe form tidak valid.', 'danger')
+        return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor')
+
+    # ── Validasi file ────────────────────────────────────────────────────────
+    errors = []
+    is_excel = False
+    if not file or file.filename == '':
+        errors.append('File wajib diunggah.')
+    else:
+        fn = file.filename.lower()
+        if fn.endswith('.dbf'):
+            is_excel = False
+        elif fn.endswith('.xlsx') or fn.endswith('.xls'):
+            is_excel = True
+        else:
+            errors.append('File harus berformat .dbf atau .xlsx/.xls')
+
+    if errors:
+        for e in errors:
+            flash(e, 'danger')
+        return render_template(
+            'upload_ekspor_impor.html',
+            title='Upload Ekspor-Impor',
+            active_tab=active_tab,
+        )
+
+    # ── Baca File (DBF atau Excel) ───────────────────────────────────────────
+    import os
+    import tempfile
+    import pandas as pd
+    
+    df = None
+    temp_path = None
+    
+    try:
+        if is_excel:
+            # Baca Excel
+            df = pd.read_excel(file, dtype=str).fillna('')
+        else:
+            # Baca DBF
+            from dbfread import DBF
+            fd, temp_path = tempfile.mkstemp(suffix='.dbf')
+            os.close(fd)
+            file.save(temp_path)
+            dbf = DBF(temp_path, load=True, lowernames=False)
+            df = pd.DataFrame(iter(dbf))
+    except Exception as e:
+        flash(f'Gagal membaca file: {e}', 'danger')
+        return render_template(
+            'upload_ekspor_impor.html',
+            title='Upload Ekspor-Impor',
+            active_tab=active_tab,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+
+    # ── Normalisasi nama kolom (strip whitespace, uppercase) ─────────────────
+    df.columns = [c.strip().upper() for c in df.columns]
+
+    # ── Mapping jika Excel Ekspor ───────────────────────────────────────────
+    if is_excel and form_type == 'ekspor':
+        # Validasi kolom excel khusus ekspor
+        missing_excel = [c for c in REQUIRED_EKSPOR_EXCEL_COLS if c not in df.columns]
+        if missing_excel:
+            flash(
+                f'Kolom Excel Ekspor tidak lengkap. Kolom yang kurang: {", ".join(missing_excel)}',
+                'danger',
+            )
+            return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+        
+        # Rename ke format yang diharapkan process_ekspor_upload
+        mapping = {
+            'THN_PROSES': 'YEAR',
+            'BLN_PROSES': 'MTH',
+            'KODE_HS': 'KODE_HS',
+            'PELABUHAN': 'PODAL5',
+            'NEGARA': 'NEWCTRYCOD',
+            'NETTO': 'NETTO',
+            'FOB': 'FOB'
+        }
+        df = df.rename(columns=mapping)
+        # Tambahkan kolom dummy yang diabaikan tapi mungkin dicek (required_cols)
+        if 'PEL_MUAT' not in df.columns: df['PEL_MUAT'] = ''
+        if 'NGRTUJUAN' not in df.columns: df['NGRTUJUAN'] = ''
+        if 'ORIG2' not in df.columns: df['ORIG2'] = ''
+        if 'PROVORIG' not in df.columns: df['PROVORIG'] = ''
+        
+        required_cols = REQUIRED_EKSPOR_COLS # Gunakan standard required cols setelah rename
+
+    # ── Mapping jika Excel/DBF Impor ──────────────────────────────────────────
+    if form_type == 'impor':
+        if is_excel:
+            missing_excel = [c for c in REQUIRED_IMPOR_EXCEL_COLS if c not in df.columns]
+            if missing_excel:
+                flash(
+                    f'Kolom Excel Impor tidak lengkap. Kurang: {", ".join(missing_excel)}',
+                    'danger',
+                )
+                return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+            
+            # Rename Excel Impor -> Standard DBF Impor format
+            mapping_impor = {
+                'KODE_HS': 'HS',
+                'NEGARA': 'K_NEGARA',
+                'NILAI': 'N1225',
+                'THN_PROSES': 'YEAR',
+                'BLN': 'MTH'
+            }
+            df = df.rename(columns=mapping_impor)
+        else:
+            # Jika DBF Impor, pastikan form Bulan dan Tahun terisi
+            bulan = request.form.get('bulan', '').strip()
+            tahun = request.form.get('tahun', '').strip()
+            
+            if not bulan or not tahun:
+                flash('Bulan dan Tahun wajib diisi untuk upload DBF Impor.', 'danger')
+                return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+            
+            # Tambahkan ke dataframe agar strukturnya sama dengan ekspor / excel impor
+            df['YEAR'] = str(tahun)
+            df['MTH'] = str(bulan).zfill(2)
+
+        required_cols = REQUIRED_IMPOR_COLS + ['YEAR', 'MTH']
+
+    # ── Validasi kolom (General) ──────────────────────────────────────────────
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        flash(
+            f'Kolom {label} tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}',
+            'danger',
+        )
+        return render_template(
+            'upload_ekspor_impor.html',
+            title='Upload Ekspor-Impor',
+            active_tab=active_tab,
+        )
+
+    if df.empty:
+        flash(f'File {label} tidak memiliki data.', 'warning')
+        return render_template(
+            'upload_ekspor_impor.html',
+            title='Upload Ekspor-Impor',
+            active_tab=active_tab,
+        )
+
+    row_count = len(df)
+    
+    stats = None
+    try:
+        from app.services.sheets import clear_progress
+        if form_type == 'ekspor':
+            from app.services.sheets import process_ekspor_upload
+            stats = process_ekspor_upload(df, task_id=task_id)
+        elif form_type == 'impor':
+            from app.services.sheets import process_impor_upload
+            stats = process_impor_upload(df, task_id=task_id)
+    except Exception as e:
+        flash(f'Gagal meng-upload {label} ke Google Sheets: {e}', 'danger')
+        return render_template(
+            'upload_ekspor_impor.html',
+            title='Upload Ekspor-Impor',
+            active_tab=active_tab,
+        )
+        
+    if task_id:
+        clear_progress(task_id)
+
+    return render_template(
+        'upload_ekspor_impor.html',
+        title='Upload Ekspor-Impor',
+        active_tab=active_tab,
+        last_upload={'type': label, 'rows': row_count},
+        stats=stats
+    )
+
+
+# ── Download Template Ekspor ───────────────────────────────────────────────────
+
+@main.route('/download-template-ekspor')
+@login_required
+def download_template_ekspor():
+    """Generate dan kirim file template Excel Ekspor."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    COLS = REQUIRED_EKSPOR_COLS
+    SAMPLE = ['2025', '1', '0101', 'TANJUNG MAS', 'JT', 'USA', 'US', '1000.50', '5000.00', 'ID', 'JAWA TENGAH']
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Template Ekspor'
+
+    # Baris 1: Judul
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
+    title_cell = ws.cell(row=1, column=1, value='Template Upload Data Ekspor — DIA BRS')
+    title_cell.font      = Font(bold=True, size=12, color='FFFFFF')
+    title_cell.fill      = PatternFill('solid', fgColor='0D9488')
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 24
+
+    # Baris 2: Keterangan
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
+    note_cell = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-1. Isi data mulai baris ke-2.')
+    note_cell.font      = Font(italic=True, size=10, color='856404')
+    note_cell.fill      = PatternFill('solid', fgColor='FFF3CD')
+    note_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[2].height = 18
+
+    # Baris 3: Header
+    hfill  = PatternFill('solid', fgColor='0D9488')
+    hfont  = Font(bold=True, color='FFFFFF', size=10)
+    hbord  = Border(bottom=Side(style='medium', color='065F46'), right=Side(style='thin', color='CCCCCC'))
+    for ci, col in enumerate(COLS, start=1):
+        cell            = ws.cell(row=3, column=ci, value=col)
+        cell.font       = hfont
+        cell.fill       = hfill
+        cell.alignment  = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border     = hbord
+    ws.row_dimensions[3].height = 30
+
+    # Baris 4: Contoh data
+    sfill = PatternFill('solid', fgColor='ECFDF5')
+    sfont = Font(color='555555', italic=True, size=10)
+    for ci, val in enumerate(SAMPLE, start=1):
+        cell           = ws.cell(row=4, column=ci, value=val)
+        cell.fill      = sfill
+        cell.font      = sfont
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    col_widths = [8, 6, 10, 16, 10, 14, 14, 12, 12, 8, 16]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = 'A4'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name='template_ekspor.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+
+# ── Download Template Impor ────────────────────────────────────────────────────
+
+@main.route('/download-template-impor')
+@login_required
+def download_template_impor():
+    """Generate dan kirim file template Excel Impor."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    COLS   = REQUIRED_IMPOR_EXCEL_COLS
+    SAMPLE = ['1', '2025', 'TANJUNG MAS', '0101.20.10', 'UNITED STATES', '450.00']
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Template Impor'
+
+    # Baris 1: Judul
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
+    title_cell = ws.cell(row=1, column=1, value='Template Upload Data Impor — DIA BRS')
+    title_cell.font      = Font(bold=True, size=12, color='FFFFFF')
+    title_cell.fill      = PatternFill('solid', fgColor='1D4ED8')
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 24
+
+    # Baris 2: Keterangan
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
+    note_cell = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-1. Isi data mulai baris ke-2.')
+    note_cell.font      = Font(italic=True, size=10, color='856404')
+    note_cell.fill      = PatternFill('solid', fgColor='FFF3CD')
+    note_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[2].height = 18
+
+    # Baris 3: Header
+    hfill  = PatternFill('solid', fgColor='1D4ED8')
+    hfont  = Font(bold=True, color='FFFFFF', size=10)
+    hbord  = Border(bottom=Side(style='medium', color='1E3A8A'), right=Side(style='thin', color='CCCCCC'))
+    for ci, col in enumerate(COLS, start=1):
+        cell            = ws.cell(row=3, column=ci, value=col)
+        cell.font       = hfont
+        cell.fill       = hfill
+        cell.alignment  = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border     = hbord
+    ws.row_dimensions[3].height = 30
+
+    # Baris 4: Contoh data
+    sfill = PatternFill('solid', fgColor='EFF6FF')
+    sfont = Font(color='555555', italic=True, size=10)
+    for ci, val in enumerate(SAMPLE, start=1):
+        cell           = ws.cell(row=4, column=ci, value=val)
+        cell.fill      = sfill
+        cell.font      = sfont
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    col_widths = [8, 12, 16, 14, 16, 14]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = 'A4'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name='template_impor.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
 

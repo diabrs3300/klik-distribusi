@@ -14,6 +14,7 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'kunci-rahasia-dia-brs-2026'
     DEBUG = False
     TESTING = False
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50 MB limit
 
     # Daftar akun yang diizinkan login (tanpa database)
     USERS = {

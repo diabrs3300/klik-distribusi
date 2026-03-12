@@ -20,6 +20,9 @@ def create_app(config_name='default'):
     login_manager.login_message = 'Silakan login terlebih dahulu.'
     login_manager.login_message_category = 'info'
 
+    # Enable Jinja2 extensions
+    app.jinja_env.add_extension('jinja2.ext.do')
+
     # Daftarkan blueprint
     from app.main import main as main_blueprint
     app.register_blueprint(main_blueprint)
@@ -30,6 +33,17 @@ def create_app(config_name='default'):
     # Error handlers
     from app.errors import register_error_handlers
     register_error_handlers(app)
+
+    # Context processor untuk constants
+    @app.context_processor
+    def inject_constants():
+        from app.constants import DOCS_SPREADSHEET_ID, KLIK_SPREADSHEET_ID
+        from datetime import datetime
+        return dict(
+            DOCS_SPREADSHEET_ID=DOCS_SPREADSHEET_ID, 
+            KLIK_SPREADSHEET_ID=KLIK_SPREADSHEET_ID,
+            current_year=datetime.now().year
+        )
 
     return app
 

@@ -19,10 +19,16 @@
                 <h3 class="fw-bold mb-1">BRS Pariwisata</h3>
                 <p class="mb-0 text-muted">Berita Resmi Statistik Perkembangan Pariwisata Jawa Tengah</p>
             </div>
-            <a href="{{ url_for('main.docs_refresh') }}" class="btn btn-sm btn-outline-secondary"
-                style="color:#7c3aed; border-color:#7c3aed;" title="Refresh daftar dokumen dari spreadsheet">
-                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-            </a>
+            <div class="d-flex gap-2">
+                <a href="https://docs.google.com/spreadsheets/d/{{ DOCS_SPREADSHEET_ID }}/edit?usp=drive_link" target="_blank" 
+                    class="btn btn-sm btn-outline-secondary" style="color:#7c3aed; border-color:#7c3aed;" title="Kelola Link dari Spreadsheet">
+                    <i class="bi bi-link-45deg me-1"></i>Manage Links
+                </a>
+                <a href="{{ url_for('main.docs_refresh') }}" class="btn btn-sm btn-outline-secondary"
+                    style="color:#7c3aed; border-color:#7c3aed;" title="Refresh daftar dokumen dari spreadsheet">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </a>
+            </div>
         </div>
     </div>
 

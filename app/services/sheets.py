@@ -264,7 +264,7 @@ def get_klik_links() -> list:
         idx_jns  = _get_idx(['jenis', 'type'], 3)
         idx_kw   = _get_idx(['keyword', 'kata kunci'], 4)
         idx_ket  = _get_idx(['keterangan', 'desc', 'description'], 5)
-        idx_thn  = _get_idx(['tahun', 'year'], 6)
+        idx_thn  = _get_idx(['tahun', 'year', 'thn', 'periode'], 6)
 
         # Kumpulkan item per kategori (pertahankan urutan kemunculan)
         from collections import OrderedDict

@@ -108,12 +108,20 @@ body {
 }
 
 /* ===== PURPLE (Pariwisata) ===== */
+:root {
+  --bs-purple-rgb: 124, 58, 237; /* #7c3aed */
+}
+
+.bg-purple {
+  background-color: #7c3aed !important;
+}
+
 .bg-purple-subtle {
   background-color: #ede9fe;
 }
 
 .text-purple {
-  color: #7c3aed;
+  color: #7c3aed !important;
 }
 
 /* ===== BREADCRUMB ===== */

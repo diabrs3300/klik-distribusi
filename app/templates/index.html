@@ -333,8 +333,8 @@
                                 {% endif %}
                                 <div class="mt-1 d-flex flex-wrap gap-1 align-items-center">
                                     {% if item.tahun %}
-                                    <span class="badge rounded-pill bg-{{ group.color }} bg-opacity-10 text-{{ group.color }} fw-bold"
-                                        style="font-size:.65rem; border: 1px solid rgba(var(--bs-{{ group.color }}-rgb), 0.2)">
+                                    <span class="badge rounded-pill bg-{{ group.color }}-subtle text-{{ group.color }} fw-bold"
+                                        style="font-size:.65rem;">
                                         {{ item.tahun }}
                                     </span>
                                     {% endif %}
@@ -342,7 +342,7 @@
                                         {% for kw in item.keyword.split(',') %}
                                             {% set kw = kw.strip() %}
                                             {% if kw %}
-                                            <span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary fw-normal"
+                                            <span class="badge rounded-pill bg-{{ group.color }}-subtle text-{{ group.color }} fw-normal"
                                                 style="font-size:.65rem;">{{ kw }}</span>
                                             {% endif %}
                                         {% endfor %}
@@ -375,7 +375,7 @@
                                     <div class="overflow-hidden">
                                         <div class="link-nama text-truncate text-muted small">{{ item.nama }}</div>
                                         <div class="mt-1 d-flex flex-wrap gap-1 align-items-center">
-                                            <span class="badge rounded-pill bg-secondary bg-opacity-25 text-secondary fw-bold"
+                                            <span class="badge rounded-pill bg-secondary-subtle text-secondary fw-bold"
                                                 style="font-size:.6rem;">{{ item.tahun }}</span>
                                             {% if item.keyword %}
                                                 {% for kw in item.keyword.split(',') %}

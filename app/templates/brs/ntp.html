@@ -6,7 +6,7 @@
     <nav aria-label="breadcrumb" class="mb-3">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{{ url_for('main.dia_brs') }}">Dashboard</a></li>
-            <li class="breadcrumb-item active">BRS NTP dan Gabah</li>
+            <li class="breadcrumb-item active">BRS NTP</li>
         </ol>
     </nav>
 
@@ -16,8 +16,8 @@
                 <i class="bi bi-tree fs-2"></i>
             </div>
             <div class="flex-grow-1">
-                <h3 class="fw-bold mb-1">BRS NTP dan Gabah</h3>
-                <p class="mb-0 text-muted">Berita Resmi Statistik Nilai Tukar Petani dan Harga Gabah Jawa Tengah</p>
+                <h3 class="fw-bold mb-1">BRS NTP</h3>
+                <p class="mb-0 text-muted">Berita Resmi Statistik Nilai Tukar Petani Jawa Tengah</p>
             </div>
             <div class="d-flex gap-2">
                 <a href="https://docs.google.com/spreadsheets/d/{{ DOCS_SPREADSHEET_ID }}/edit?usp=drive_link"
@@ -37,7 +37,7 @@
         <a href="{{ url_for('main.upload_ntp') }}" class="btn btn-success">
             <i class="bi bi-cloud-upload me-2"></i>Upload File Excel
         </a>
-        <span class="text-muted small ms-2">Upload data Excel NTP dan Gabah langsung ke Google Sheets</span>
+        <span class="text-muted small ms-2">Upload data Excel NTP langsung ke Google Sheets</span>
     </div> -->
 
     {% if docs %}

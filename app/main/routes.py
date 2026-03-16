@@ -92,7 +92,7 @@ def brs_ihk():
 @_require_akses('akses_ntp')
 def brs_ntp():
     docs = get_docs('NTP', fallback=[])
-    return render_template('brs/ntp.html', title='BRS NTP dan Gabah', docs=docs)
+    return render_template('brs/ntp.html', title='BRS NTP', docs=docs)
 
 
 @main.route('/brs/transportasi')
@@ -726,7 +726,7 @@ REQUIRED_NTP_COLS = [
 @_require_akses('akses_ntp')
 def upload_ntp():
     if request.method == 'GET':
-        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+        return render_template('upload_ntp.html', title='Upload Excel NTP')
 
     bulan   = request.form.get('bulan', '').strip()
     tahun   = request.form.get('tahun', '').strip()
@@ -747,33 +747,33 @@ def upload_ntp():
     if errors:
         for e in errors:
             flash(e, 'danger')
-        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+        return render_template('upload_ntp.html', title='Upload Excel NTP')
 
     try:
         import pandas as pd
         df = pd.read_excel(file, header=2, dtype=str).fillna('')
     except Exception as e:
         flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+        return render_template('upload_ntp.html', title='Upload Excel NTP')
 
     missing_cols = [c for c in REQUIRED_NTP_COLS if c not in df.columns]
     if missing_cols:
         flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
-        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+        return render_template('upload_ntp.html', title='Upload Excel NTP')
 
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+        return render_template('upload_ntp.html', title='Upload Excel NTP')
 
     flash('File berhasil dibaca. Fitur upload NTP ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+    return render_template('upload_ntp.html', title='Upload Excel NTP')
 
 
 @main.route('/download-template-ntp')
 @login_required
 @_require_akses('akses_ntp')
 def download_template_ntp():
-    """Generate dan kirim file template Excel NTP dan Gabah."""
+    """Generate dan kirim file template Excel NTP."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -785,8 +785,8 @@ def download_template_ntp():
     ws = wb.active
     ws.title = 'Template NTP'
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
-    c = ws.cell(row=1, column=1, value='Template Upload Data NTP dan Gabah — DIA BRS')
+    ws.merge_cells('A1:J1')
+    c = ws.cell(row=1, column=1, value='Template Upload Data NTP — DIA BRS')
     c.font = Font(bold=True, size=12, color='FFFFFF')
     c.fill = PatternFill('solid', fgColor='198754')
     c.alignment = Alignment(horizontal='center', vertical='center')

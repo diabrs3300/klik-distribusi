@@ -20,7 +20,8 @@
                 <p class="mb-0 text-muted">Berita Resmi Statistik Perkembangan Transportasi Jawa Tengah</p>
             </div>
             <div class="d-flex gap-2">
-                <a href="https://docs.google.com/spreadsheets/d/{{ DOCS_SPREADSHEET_ID }}/edit?usp=drive_link" target="_blank" class="btn btn-sm btn-outline-warning" title="Kelola Link dari Spreadsheet">
+                <a href="https://docs.google.com/spreadsheets/d/{{ DOCS_SPREADSHEET_ID }}/edit?usp=drive_link"
+                    target="_blank" class="btn btn-sm btn-outline-warning" title="Kelola Link dari Spreadsheet">
                     <i class="bi bi-link-45deg me-1"></i>Manage Links
                 </a>
                 <a href="{{ url_for('main.docs_refresh') }}" class="btn btn-sm btn-outline-warning"
@@ -31,46 +32,56 @@
         </div>
     </div>
 
+    <!-- Tombol Upload -->
+    <!-- <div class="mb-3">
+        <a href="{{ url_for('main.upload_transportasi') }}" class="btn btn-warning">
+            <i class="bi bi-cloud-upload me-2"></i>Upload File Excel
+        </a>
+        <span class="text-muted small ms-2">Upload data Excel Transportasi langsung ke Google Sheets</span>
+    </div> -->
+
     {% if docs %}
-        <div class="row g-3 align-items-start">
+    <div class="row g-3 align-items-start">
         {% for group in docs %}
         <div class="col-lg-4 col-md-6">
-        <div class="card shadow-sm border-0 h-100">
-        <div class="card-header bg-white py-2 px-4 border-bottom d-flex align-items-center gap-2">
-            <i class="bi {{ group.icon }} text-warning"></i>
-            <h6 class="fw-bold mb-0">{{ group.kategori }}</h6>
-            <span class="badge bg-warning-subtle text-warning ms-auto">{{ group.dokumen | length }}</span>
-        </div>
-        <div class="list-group list-group-flush">
-            {% for doc in group.dokumen %}
-            {% if doc.url %}
-            <a href="{{ doc.url }}" target="_blank" rel="noopener noreferrer"
-                class="list-group-item list-group-item-action d-flex align-items-center gap-3 py-3 px-4">
-                {% else %}
-                <div class="list-group-item d-flex align-items-center gap-3 py-3 px-4" title="Link belum tersedia">
-                    {% endif %}
-                    <span class="doc-num bg-warning-subtle text-warning">{{ loop.index }}</span>
-                    <div class="flex-grow-1">
-                        <div class="fw-semibold {% if not doc.url %}text-muted{% endif %}">{{ doc.label }}</div>
-                        {% if doc.desc %}<small class="text-muted">{{ doc.desc }}</small>{% endif %}
-                    </div>
-                    <i
-                        class="bi {{ doc.icon }} ms-auto {% if doc.url %}text-muted{% else %}text-secondary opacity-50{% endif %}"></i>
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white py-2 px-4 border-bottom d-flex align-items-center gap-2">
+                    <i class="bi {{ group.icon }} text-warning"></i>
+                    <h6 class="fw-bold mb-0">{{ group.kategori }}</h6>
+                    <span class="badge bg-warning-subtle text-warning ms-auto">{{ group.dokumen | length }}</span>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for doc in group.dokumen %}
                     {% if doc.url %}
-            </a>{% else %}
-        </div>{% endif %}
-        {% endfor %}
+                    <a href="{{ doc.url }}" target="_blank" rel="noopener noreferrer"
+                        class="list-group-item list-group-item-action d-flex align-items-center gap-3 py-3 px-4">
+                        {% else %}
+                        <div class="list-group-item d-flex align-items-center gap-3 py-3 px-4"
+                            title="Link belum tersedia">
+                            {% endif %}
+                            <span class="doc-num bg-warning-subtle text-warning">{{ loop.index }}</span>
+                            <div class="flex-grow-1">
+                                <div class="fw-semibold {% if not doc.url %}text-muted{% endif %}">{{ doc.label }}</div>
+                                {% if doc.desc %}<small class="text-muted">{{ doc.desc }}</small>{% endif %}
+                            </div>
+                            <i
+                                class="bi {{ doc.icon }} ms-auto {% if doc.url %}text-muted{% else %}text-secondary opacity-50{% endif %}"></i>
+                            {% if doc.url %}
+                    </a>{% else %}
+                </div>{% endif %}
+                {% endfor %}
+            </div>
+        </div>
     </div>
+    {% endfor %}
 </div>
-        </div>
-        {% endfor %}
-        </div>
-    {% else %}
+{% else %}
 <div class="card shadow-sm border-0">
     <div class="card-body text-center py-5 text-muted">
         <i class="bi bi-cloud-slash fs-1 d-block mb-3 opacity-50"></i>
         <p>Dokumen belum tersedia. Pastikan sheet <code>Transportasi</code> di Google Sheets sudah diisi, lalu klik
-            <strong>Refresh</strong>.</p>
+            <strong>Refresh</strong>.
+        </p>
     </div>
 </div>
 {% endif %}
@@ -83,4 +94,3 @@
 
 </div>
 {% endblock %}
-

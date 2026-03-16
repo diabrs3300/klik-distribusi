@@ -203,8 +203,8 @@
                             ke-3)</strong>:</p>
                     <div class="d-flex flex-wrap gap-1 mb-3">
                         {% for col in [
-                        'Tahun','Bulan','Kode Kota','Nama Kota','Kode Komoditas',
-                        'Nama Komoditas','Flag','NK','IHK',
+                        'Tahun','Bulan','Kode Kota','Kode Komoditas',
+                        'IHK','NK',
                         'Inflasi MtM','Inflasi YtD','Inflasi YoY',
                         'Andil MtM','Andil YtD','Andil YoY'
                         ] %}
@@ -212,6 +212,10 @@
                             style="font-size:0.78rem;">{{ col }}</span>
                         {% endfor %}
                     </div>
+                    <p class="small text-muted mb-0">
+                        <i class="bi bi-info-circle me-1 text-info"></i>
+                        Kolom opsional: <code>Nama Kota</code>, <code>Nama Komoditas</code>, <code>Flag</code>
+                    </p>
                     <hr />
                     <p class="small text-muted mb-2"><strong>Sheet Google Sheets yang diupdate:</strong></p>
                     <div class="d-flex flex-wrap gap-1">

@@ -20,7 +20,8 @@
                 <p class="mb-0 text-muted">Berita Resmi Statistik Perkembangan Ekspor dan Impor Jawa Tengah</p>
             </div>
             <div class="d-flex gap-2">
-                <a href="https://docs.google.com/spreadsheets/d/{{ DOCS_SPREADSHEET_ID }}/edit?usp=drive_link" target="_blank" class="btn btn-sm btn-outline-info" title="Kelola Link dari Spreadsheet">
+                <a href="https://docs.google.com/spreadsheets/d/{{ DOCS_SPREADSHEET_ID }}/edit?usp=drive_link"
+                    target="_blank" class="btn btn-sm btn-outline-info" title="Kelola Link dari Spreadsheet">
                     <i class="bi bi-link-45deg me-1"></i>Manage Links
                 </a>
                 <a href="{{ url_for('main.docs_refresh') }}" class="btn btn-sm btn-outline-info"
@@ -34,9 +35,9 @@
     <!-- Tombol Upload -->
     <div class="mb-3">
         <a href="{{ url_for('main.upload_ekspor_impor') }}" class="btn btn-info text-white">
-            <i class="bi bi-cloud-upload me-2"></i>Upload File Excel
+            <i class="bi bi-cloud-upload me-2"></i>Upload File DBF/Excel
         </a>
-        <span class="text-muted small ms-2">Upload data Excel Ekspor-Impor mentah ke sistem</span>
+        <span class="text-muted small ms-2">Upload data DBF/Excel Ekspor dan Impor langsung ke Google Sheets</span>
     </div>
 
     {% if docs %}

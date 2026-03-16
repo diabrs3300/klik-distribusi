@@ -98,9 +98,9 @@ def get_docs(section: str, fallback: list) -> list:
 
     Format baris di Google Sheets (header baris 1, data mulai baris 2):
         Kolom A : Nama Dokumen
-        Kolom B : Deskripsi
-        Kolom C : Link
-        Kolom D : Kategori  (misal: 'Master', 'BRS', 'Folder')
+        Kolom B : Kategori  (misal: 'Master', 'BRS', 'Folder')
+        Kolom C : Deskripsi
+        Kolom D : Link
 
     Return — list of category groups:
         [{'kategori': 'Master', 'icon': 'bi-pencil-fill',
@@ -140,6 +140,22 @@ def get_docs(section: str, fallback: list) -> list:
         worksheet = spreadsheet.worksheet(sheet_name)
 
         rows = worksheet.get_all_values()
+        if not rows:
+            return fallback
+
+        header = [h.strip().lower() for h in rows[0]]
+        
+        # Mapping index kolom secara dinamis
+        def _get_idx(names: list, default: int) -> int:
+            for name in names:
+                if name.lower() in header:
+                    return header.index(name.lower())
+            return default
+
+        idx_label = _get_idx(['nama dokumen', 'label', 'nama'], 0)
+        idx_kat   = _get_idx(['kategori', 'category', 'group'], 1)
+        idx_desc  = _get_idx(['deskripsi', 'description', 'desc'], 2)
+        idx_url   = _get_idx(['link', 'url'], 3)
 
         from collections import OrderedDict
         grouped = OrderedDict()
@@ -147,10 +163,11 @@ def get_docs(section: str, fallback: list) -> list:
         for row in rows[1:]:
             if not any(row):
                 continue
-            label    = row[0].strip() if len(row) > 0 else ''
-            desc     = row[1].strip() if len(row) > 1 else ''
-            url      = row[2].strip() if len(row) > 2 else ''
-            kategori = row[3].strip() if len(row) > 3 else 'Lainnya'
+            
+            label    = row[idx_label].strip() if len(row) > idx_label else ''
+            kategori = row[idx_kat].strip() if len(row) > idx_kat else 'Lainnya'
+            desc     = row[idx_desc].strip() if len(row) > idx_desc else ''
+            url      = row[idx_url].strip() if len(row) > idx_url else ''
 
             if not label:
                 continue

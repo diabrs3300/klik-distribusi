@@ -106,8 +106,8 @@ def brs_pariwisata():
 # ─── Upload IHK ───────────────────────────────────────────────────────────────
 
 REQUIRED_EXCEL_COLS = [
-    'Tahun', 'Bulan', 'Kode Kota', 'Nama Kota', 'Kode Komoditas',
-    'Nama Komoditas', 'Flag', 'NK', 'IHK',
+    'Tahun', 'Bulan', 'Kode Kota', 'Kode Komoditas',
+    'IHK', 'NK',
     'Inflasi MtM', 'Inflasi YtD', 'Inflasi YoY',
     'Andil MtM', 'Andil YtD', 'Andil YoY',
 ]
@@ -691,3 +691,334 @@ def download_template_impor():
     )
 
 
+# ─── Upload NTP ───────────────────────────────────────────────────────────────
+
+REQUIRED_NTP_COLS = [
+    'Tahun', 'Bulan', 'Kode Provinsi', 'Nama Provinsi',
+    'NTP', 'NTPP', 'NTPH', 'NTPN', 'NTPF', 'NTPE',
+]
+
+@main.route('/upload-ntp', methods=['GET', 'POST'])
+@login_required
+def upload_ntp():
+    if request.method == 'GET':
+        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+
+    bulan   = request.form.get('bulan', '').strip()
+    tahun   = request.form.get('tahun', '').strip()
+    file    = request.files.get('file')
+
+    errors = []
+    if not bulan:
+        errors.append('Bulan wajib dipilih.')
+    if not tahun:
+        errors.append('Tahun wajib diisi.')
+    elif not tahun.isdigit() or len(tahun) != 4:
+        errors.append('Tahun harus 4 digit angka.')
+    if not file or file.filename == '':
+        errors.append('File Excel wajib diunggah.')
+    elif not file.filename.lower().endswith('.xlsx'):
+        errors.append('File harus berformat .xlsx')
+
+    if errors:
+        for e in errors:
+            flash(e, 'danger')
+        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+
+    try:
+        import pandas as pd
+        df = pd.read_excel(file, header=2, dtype=str).fillna('')
+    except Exception as e:
+        flash(f'Gagal membaca file Excel: {e}', 'danger')
+        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+
+    missing_cols = [c for c in REQUIRED_NTP_COLS if c not in df.columns]
+    if missing_cols:
+        flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
+        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+
+    if df.empty:
+        flash('File Excel tidak memiliki data.', 'warning')
+        return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+
+    flash('File berhasil dibaca. Fitur upload NTP ke Google Sheets sedang dalam pengembangan.', 'info')
+    return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
+
+
+@main.route('/download-template-ntp')
+@login_required
+def download_template_ntp():
+    """Generate dan kirim file template Excel NTP dan Gabah."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    COLS = REQUIRED_NTP_COLS
+    SAMPLE = ['2026', '8', '33', 'JAWA TENGAH', '105.12', '102.30', '107.50', '103.00', '108.20', '104.10']
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Template NTP'
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
+    c = ws.cell(row=1, column=1, value='Template Upload Data NTP dan Gabah — DIA BRS')
+    c.font = Font(bold=True, size=12, color='FFFFFF')
+    c.fill = PatternFill('solid', fgColor='198754')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 24
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
+    n = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-3. Isi data mulai baris ke-4.')
+    n.font = Font(italic=True, size=10, color='856404')
+    n.fill = PatternFill('solid', fgColor='FFF3CD')
+    n.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[2].height = 18
+
+    hfill = PatternFill('solid', fgColor='198754')
+    hfont = Font(bold=True, color='FFFFFF', size=10)
+    hbord = Border(bottom=Side(style='medium', color='145C32'), right=Side(style='thin', color='CCCCCC'))
+    for ci, col in enumerate(COLS, start=1):
+        cell = ws.cell(row=3, column=ci, value=col)
+        cell.font, cell.fill = hfont, hfill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = hbord
+    ws.row_dimensions[3].height = 30
+
+    sfill = PatternFill('solid', fgColor='E8F5E9')
+    sfont = Font(color='555555', italic=True, size=10)
+    for ci, val in enumerate(SAMPLE[:len(COLS)], start=1):
+        cell = ws.cell(row=4, column=ci, value=val)
+        cell.fill, cell.font = sfill, sfont
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for i in range(1, len(COLS) + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 14
+    ws.freeze_panes = 'A4'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name='template_ntp.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ─── Upload Pariwisata ────────────────────────────────────────────────────────
+
+REQUIRED_PARIWISATA_COLS = [
+    'Tahun', 'Bulan', 'Nama Hotel', 'Kelas Hotel',
+    'TPK', 'RATS', 'Tamu Asing', 'Tamu Domestik',
+]
+
+@main.route('/upload-pariwisata', methods=['GET', 'POST'])
+@login_required
+def upload_pariwisata():
+    if request.method == 'GET':
+        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+
+    bulan   = request.form.get('bulan', '').strip()
+    tahun   = request.form.get('tahun', '').strip()
+    file    = request.files.get('file')
+
+    errors = []
+    if not bulan:
+        errors.append('Bulan wajib dipilih.')
+    if not tahun:
+        errors.append('Tahun wajib diisi.')
+    elif not tahun.isdigit() or len(tahun) != 4:
+        errors.append('Tahun harus 4 digit angka.')
+    if not file or file.filename == '':
+        errors.append('File Excel wajib diunggah.')
+    elif not file.filename.lower().endswith('.xlsx'):
+        errors.append('File harus berformat .xlsx')
+
+    if errors:
+        for e in errors:
+            flash(e, 'danger')
+        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+
+    try:
+        import pandas as pd
+        df = pd.read_excel(file, header=2, dtype=str).fillna('')
+    except Exception as e:
+        flash(f'Gagal membaca file Excel: {e}', 'danger')
+        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+
+    missing_cols = [c for c in REQUIRED_PARIWISATA_COLS if c not in df.columns]
+    if missing_cols:
+        flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
+        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+
+    if df.empty:
+        flash('File Excel tidak memiliki data.', 'warning')
+        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+
+    flash('File berhasil dibaca. Fitur upload Pariwisata ke Google Sheets sedang dalam pengembangan.', 'info')
+    return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+
+
+@main.route('/download-template-pariwisata')
+@login_required
+def download_template_pariwisata():
+    """Generate dan kirim file template Excel Pariwisata."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    COLS = REQUIRED_PARIWISATA_COLS
+    SAMPLE = ['2026', '8', 'Grand Artos', 'Bintang 4', '62.50', '2.10', '120', '850']
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Template Pariwisata'
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
+    c = ws.cell(row=1, column=1, value='Template Upload Data Pariwisata — DIA BRS')
+    c.font = Font(bold=True, size=12, color='FFFFFF')
+    c.fill = PatternFill('solid', fgColor='7C3AED')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 24
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
+    n = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-3. Isi data mulai baris ke-4.')
+    n.font = Font(italic=True, size=10, color='856404')
+    n.fill = PatternFill('solid', fgColor='FFF3CD')
+    n.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[2].height = 18
+
+    hfill = PatternFill('solid', fgColor='7C3AED')
+    hfont = Font(bold=True, color='FFFFFF', size=10)
+    hbord = Border(bottom=Side(style='medium', color='5B21B6'), right=Side(style='thin', color='CCCCCC'))
+    for ci, col in enumerate(COLS, start=1):
+        cell = ws.cell(row=3, column=ci, value=col)
+        cell.font, cell.fill = hfont, hfill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = hbord
+    ws.row_dimensions[3].height = 30
+
+    sfill = PatternFill('solid', fgColor='EDE9FE')
+    sfont = Font(color='555555', italic=True, size=10)
+    for ci, val in enumerate(SAMPLE[:len(COLS)], start=1):
+        cell = ws.cell(row=4, column=ci, value=val)
+        cell.fill, cell.font = sfill, sfont
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for i in range(1, len(COLS) + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 16
+    ws.freeze_panes = 'A4'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name='template_pariwisata.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ─── Upload Transportasi ──────────────────────────────────────────────────────
+
+REQUIRED_TRANSPORTASI_COLS = [
+    'Tahun', 'Bulan', 'Moda', 'Nama Perusahaan',
+    'Penumpang Berangkat', 'Penumpang Datang', 'Barang Muat', 'Barang Bongkar',
+]
+
+@main.route('/upload-transportasi', methods=['GET', 'POST'])
+@login_required
+def upload_transportasi():
+    if request.method == 'GET':
+        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+
+    bulan   = request.form.get('bulan', '').strip()
+    tahun   = request.form.get('tahun', '').strip()
+    file    = request.files.get('file')
+
+    errors = []
+    if not bulan:
+        errors.append('Bulan wajib dipilih.')
+    if not tahun:
+        errors.append('Tahun wajib diisi.')
+    elif not tahun.isdigit() or len(tahun) != 4:
+        errors.append('Tahun harus 4 digit angka.')
+    if not file or file.filename == '':
+        errors.append('File Excel wajib diunggah.')
+    elif not file.filename.lower().endswith('.xlsx'):
+        errors.append('File harus berformat .xlsx')
+
+    if errors:
+        for e in errors:
+            flash(e, 'danger')
+        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+
+    try:
+        import pandas as pd
+        df = pd.read_excel(file, header=2, dtype=str).fillna('')
+    except Exception as e:
+        flash(f'Gagal membaca file Excel: {e}', 'danger')
+        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+
+    missing_cols = [c for c in REQUIRED_TRANSPORTASI_COLS if c not in df.columns]
+    if missing_cols:
+        flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
+        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+
+    if df.empty:
+        flash('File Excel tidak memiliki data.', 'warning')
+        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+
+    flash('File berhasil dibaca. Fitur upload Transportasi ke Google Sheets sedang dalam pengembangan.', 'info')
+    return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+
+
+@main.route('/download-template-transportasi')
+@login_required
+def download_template_transportasi():
+    """Generate dan kirim file template Excel Transportasi."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    COLS = REQUIRED_TRANSPORTASI_COLS
+    SAMPLE = ['2026', '8', 'Udara', 'Garuda Indonesia', '12500', '11800', '850.50', '920.30']
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Template Transportasi'
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
+    c = ws.cell(row=1, column=1, value='Template Upload Data Transportasi — DIA BRS')
+    c.font = Font(bold=True, size=12, color='FFFFFF')
+    c.fill = PatternFill('solid', fgColor='D97706')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 24
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
+    n = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-3. Isi data mulai baris ke-4.')
+    n.font = Font(italic=True, size=10, color='856404')
+    n.fill = PatternFill('solid', fgColor='FFF3CD')
+    n.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[2].height = 18
+
+    hfill = PatternFill('solid', fgColor='D97706')
+    hfont = Font(bold=True, color='FFFFFF', size=10)
+    hbord = Border(bottom=Side(style='medium', color='92400E'), right=Side(style='thin', color='CCCCCC'))
+    for ci, col in enumerate(COLS, start=1):
+        cell = ws.cell(row=3, column=ci, value=col)
+        cell.font, cell.fill = hfont, hfill
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = hbord
+    ws.row_dimensions[3].height = 30
+
+    sfill = PatternFill('solid', fgColor='FFFBEB')
+    sfont = Font(color='555555', italic=True, size=10)
+    for ci, val in enumerate(SAMPLE[:len(COLS)], start=1):
+        cell = ws.cell(row=4, column=ci, value=val)
+        cell.fill, cell.font = sfill, sfont
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for i in range(1, len(COLS) + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 18
+    ws.freeze_panes = 'A4'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name='template_transportasi.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

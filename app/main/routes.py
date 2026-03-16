@@ -1,12 +1,25 @@
 """
 Routes untuk blueprint main (halaman utama dan BRS).
 """
-from flask import render_template, request, redirect, url_for, flash, send_file
-from flask_login import login_required
+from functools import wraps
+from flask import render_template, request, redirect, url_for, flash, send_file, abort
+from flask_login import login_required, current_user
 from app.main import main
 from app.services.sheets import get_docs, get_klik_links, clear_docs_cache
 import app.services.sheets as _sheets
 import io
+
+
+def _require_akses(flag_key):
+    """Decorator: tolak akses (403) jika user tidak punya flag_key."""
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if not current_user.akses.get(flag_key, False):
+                abort(403)
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 
@@ -68,6 +81,7 @@ from app.services.sheets import get_docs
 
 @main.route('/brs/ihk')
 @login_required
+@_require_akses('akses_ihk')
 def brs_ihk():
     docs = get_docs('IHK', fallback=[])
     return render_template('brs/ihk.html', title='BRS IHK-Inflasi', docs=docs)
@@ -75,6 +89,7 @@ def brs_ihk():
 
 @main.route('/brs/ntp')
 @login_required
+@_require_akses('akses_ntp')
 def brs_ntp():
     docs = get_docs('NTP', fallback=[])
     return render_template('brs/ntp.html', title='BRS NTP dan Gabah', docs=docs)
@@ -82,6 +97,7 @@ def brs_ntp():
 
 @main.route('/brs/transportasi')
 @login_required
+@_require_akses('akses_transportasi')
 def brs_transportasi():
     docs = get_docs('Transportasi', fallback=[])
     return render_template('brs/transportasi.html', title='BRS Transportasi', docs=docs)
@@ -89,6 +105,7 @@ def brs_transportasi():
 
 @main.route('/brs/ekspor')
 @login_required
+@_require_akses('akses_ekspor_impor')
 def brs_ekspor():
     docs = get_docs('Ekspor', fallback=[])
     return render_template('brs/ekspor.html', title='BRS Ekspor Impor', docs=docs)
@@ -96,6 +113,7 @@ def brs_ekspor():
 
 @main.route('/brs/pariwisata')
 @login_required
+@_require_akses('akses_pariwisata')
 def brs_pariwisata():
     docs = get_docs('Pariwisata', fallback=[])
     return render_template('brs/pariwisata.html', title='BRS Pariwisata', docs=docs)
@@ -123,6 +141,7 @@ def upload_progress(task_id):
 
 @main.route('/upload-ihk', methods=['GET', 'POST'])
 @login_required
+@_require_akses('akses_ihk')
 def upload_ihk():
     if request.method == 'GET':
         return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
@@ -244,6 +263,7 @@ def upload_ihk():
 
 @main.route('/download-template-ihk')
 @login_required
+@_require_akses('akses_ihk')
 def download_template_ihk():
     """Generate dan kirim file template Excel IHK-Inflasi."""
     import openpyxl
@@ -353,6 +373,7 @@ REQUIRED_EKSPOR_EXCEL_COLS = [
 
 @main.route('/upload-ekspor-impor', methods=['GET', 'POST'])
 @login_required
+@_require_akses('akses_ekspor_impor')
 def upload_ekspor_impor():
     if request.method == 'GET':
         return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor')
@@ -555,6 +576,7 @@ def upload_ekspor_impor():
 
 @main.route('/download-template-ekspor')
 @login_required
+@_require_akses('akses_ekspor_impor')
 def download_template_ekspor():
     """Generate dan kirim file template Excel Ekspor."""
     import openpyxl
@@ -625,6 +647,7 @@ def download_template_ekspor():
 
 @main.route('/download-template-impor')
 @login_required
+@_require_akses('akses_ekspor_impor')
 def download_template_impor():
     """Generate dan kirim file template Excel Impor."""
     import openpyxl
@@ -700,6 +723,7 @@ REQUIRED_NTP_COLS = [
 
 @main.route('/upload-ntp', methods=['GET', 'POST'])
 @login_required
+@_require_akses('akses_ntp')
 def upload_ntp():
     if request.method == 'GET':
         return render_template('upload_ntp.html', title='Upload Excel NTP dan Gabah')
@@ -747,6 +771,7 @@ def upload_ntp():
 
 @main.route('/download-template-ntp')
 @login_required
+@_require_akses('akses_ntp')
 def download_template_ntp():
     """Generate dan kirim file template Excel NTP dan Gabah."""
     import openpyxl
@@ -811,6 +836,7 @@ REQUIRED_PARIWISATA_COLS = [
 
 @main.route('/upload-pariwisata', methods=['GET', 'POST'])
 @login_required
+@_require_akses('akses_pariwisata')
 def upload_pariwisata():
     if request.method == 'GET':
         return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
@@ -858,6 +884,7 @@ def upload_pariwisata():
 
 @main.route('/download-template-pariwisata')
 @login_required
+@_require_akses('akses_pariwisata')
 def download_template_pariwisata():
     """Generate dan kirim file template Excel Pariwisata."""
     import openpyxl
@@ -922,6 +949,7 @@ REQUIRED_TRANSPORTASI_COLS = [
 
 @main.route('/upload-transportasi', methods=['GET', 'POST'])
 @login_required
+@_require_akses('akses_transportasi')
 def upload_transportasi():
     if request.method == 'GET':
         return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
@@ -969,6 +997,7 @@ def upload_transportasi():
 
 @main.route('/download-template-transportasi')
 @login_required
+@_require_akses('akses_transportasi')
 def download_template_transportasi():
     """Generate dan kirim file template Excel Transportasi."""
     import openpyxl

@@ -18,6 +18,7 @@
     <!-- BRS Card Grid -->
     <div class="row g-4">
 
+        {% if current_user.akses.get('akses_ihk') %}
         <!-- 1. IHK / Inflasi -->
         <div class="col-md-6 col-xl-4">
             <a href="{{ url_for('main.brs_ihk') }}" class="text-decoration-none">
@@ -38,7 +39,9 @@
                 </div>
             </a>
         </div>
+        {% endif %}
 
+        {% if current_user.akses.get('akses_ntp') %}
         <!-- 2. NTP dan Gabah -->
         <div class="col-md-6 col-xl-4">
             <a href="{{ url_for('main.brs_ntp') }}" class="text-decoration-none">
@@ -59,7 +62,9 @@
                 </div>
             </a>
         </div>
+        {% endif %}
 
+        {% if current_user.akses.get('akses_transportasi') %}
         <!-- 3. Transportasi -->
         <div class="col-md-6 col-xl-4">
             <a href="{{ url_for('main.brs_transportasi') }}" class="text-decoration-none">
@@ -80,7 +85,9 @@
                 </div>
             </a>
         </div>
+        {% endif %}
 
+        {% if current_user.akses.get('akses_ekspor_impor') %}
         <!-- 4. Ekspor Impor -->
         <div class="col-md-6 col-xl-4">
             <a href="{{ url_for('main.brs_ekspor') }}" class="text-decoration-none">
@@ -101,7 +108,9 @@
                 </div>
             </a>
         </div>
+        {% endif %}
 
+        {% if current_user.akses.get('akses_pariwisata') %}
         <!-- 5. Pariwisata -->
         <div class="col-md-6 col-xl-4">
             <a href="{{ url_for('main.brs_pariwisata') }}" class="text-decoration-none">
@@ -122,6 +131,7 @@
                 </div>
             </a>
         </div>
+        {% endif %}
 
     </div><!-- /row -->
 </div>

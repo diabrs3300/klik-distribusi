@@ -37,7 +37,12 @@
         <!-- Card Login -->
         <div class="card shadow-lg border-0 login-card">
             <div class="card-body p-4 p-md-5">
-                <h5 class="fw-bold mb-1">Masuk ke Akun Anda</h5>
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <h5 class="fw-bold mb-0">Masuk ke Akun Anda</h5>
+                    <a href="{{ url_for('auth.refresh_users') }}" class="btn btn-sm btn-outline-secondary py-0 px-2" title="Refresh Data Akun dari GSheets">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </a>
+                </div>
                 <p class="text-muted small mb-4">Gunakan username dan password yang telah diberikan.</p>
 
                 <!-- Flash messages -->

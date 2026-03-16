@@ -17,5 +17,9 @@ DOCS_SHEET_MAP = {
 # ─── Klik Distribusi via Google Sheets ────────────────────────────────────────
 KLIK_SPREADSHEET_ID = '1GqZ9a95FuNLsqEphO2aBzc0ZYlVIzhpk3_ltG-wSaII'  # ← ID spreadsheet Klik Distribusi
 
+# ─── Users via Google Sheets ──────────────────────────────────────────────────
+USERS_SPREADSHEET_ID = '18q4H3ZJhSlGY593oCHSBaRTnkJXSNMFJUP_JLfbbo7w'
+USERS_SHEET_NAME = 'akun'
+
 # ─── TTL Cache (berlaku untuk keduanya) ───────────────────────────────────────
 DOCS_CACHE_TTL = 300  # detik (default: 5 menit)

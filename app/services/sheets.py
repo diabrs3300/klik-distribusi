@@ -339,6 +339,102 @@ def get_klik_links() -> list:
         return _klik_cache or []   # kembalikan cache lama jika ada, atau kosong
 
 
+# ─── Data User dari GSheets ───────────────────────────────────────────────────
+
+_users_cache: dict = {}
+_users_cache_ts: float = 0.0
+
+def get_users() -> dict:
+    """
+    Fetch daftar user dari Google Sheets.
+    Return dict: {'username': {'password': '...', 'nama': '...', 'akses_ihk': True, ...}}
+    Di-cache selama DOCS_CACHE_TTL detik.
+    Jika gagal, kembalikan dictionary kosong (akan fallback ke config.USERS).
+    """
+    from app.constants import USERS_SPREADSHEET_ID, USERS_SHEET_NAME, DOCS_CACHE_TTL
+    global _users_cache, _users_cache_ts
+
+    if not USERS_SPREADSHEET_ID:
+        return {}
+
+    now = _time.time()
+    if _users_cache and (now - _users_cache_ts) < DOCS_CACHE_TTL:
+        return _users_cache
+
+    try:
+        spreadsheet = _get_spreadsheet(USERS_SPREADSHEET_ID)
+        worksheet = spreadsheet.worksheet(USERS_SHEET_NAME)
+        rows = worksheet.get_all_values()
+        
+        if not rows or len(rows) < 2:
+            return {}
+
+        header = [str(h).strip().lower() for h in rows[0]]
+        
+        def _get_idx(names: list[str]) -> int:
+            for name in names:
+                if name in header:
+                    return header.index(name)
+            return -1
+
+        idx_user   = _get_idx(['username', 'user'])
+        idx_nama   = _get_idx(['nama', 'name'])
+        idx_pass   = _get_idx(['password', 'sandi'])
+        idx_ihk    = _get_idx(['akses ihk', 'ihk'])
+        idx_exim   = _get_idx(['akses ekspor impor', 'akses exim', 'ekspor impor', 'exim'])
+        idx_ntp    = _get_idx(['akses ntp', 'ntp'])
+        idx_trans  = _get_idx(['akses transportasi', 'transportasi'])
+        idx_pari   = _get_idx(['akses pariwisata', 'pariwisata'])
+
+        if idx_user == -1 or idx_pass == -1:
+            _log.error("Kolom 'Username' atau 'Password' tidak ditemukan di sheet user.")
+            return {}
+
+        users_dict = {}
+
+        def _is_true(val: str) -> bool:
+            return str(val).strip().upper() == 'TRUE'
+
+        for row in rows[1:]:
+            if not any(row):
+                continue
+
+            # Ambil nilai berdasarkan index
+            username_raw = row[idx_user].strip() if len(row) > idx_user else ''
+            nama_asli    = row[idx_nama].strip() if idx_nama != -1 and len(row) > idx_nama else username_raw
+            password     = row[idx_pass].strip() if len(row) > idx_pass else ''
+            
+            if not username_raw or not password:
+                continue
+                
+            # Username di-lowercase untuk mempermudah pencocokan saat login
+            username = username_raw.lower()
+
+            users_dict[username] = {
+                'nama'              : nama_asli,
+                'password'          : password, # Plaintext!
+                'akses_ihk'         : _is_true(row[idx_ihk]) if idx_ihk != -1 and len(row) > idx_ihk else False,
+                'akses_ekspor_impor': _is_true(row[idx_exim]) if idx_exim != -1 and len(row) > idx_exim else False,
+                'akses_ntp'         : _is_true(row[idx_ntp]) if idx_ntp != -1 and len(row) > idx_ntp else False,
+                'akses_transportasi': _is_true(row[idx_trans]) if idx_trans != -1 and len(row) > idx_trans else False,
+                'akses_pariwisata'  : _is_true(row[idx_pari]) if idx_pari != -1 and len(row) > idx_pari else False,
+            }
+
+        _users_cache = users_dict
+        _users_cache_ts = now
+        return users_dict
+
+    except Exception as e:
+        _log.error('get_users() error: %s', e, exc_info=True)
+        return _users_cache or {}
+
+def clear_users_cache():
+    """Paksa refresh cache user pada request berikutnya."""
+    global _users_cache, _users_cache_ts
+    _users_cache.clear()
+    _users_cache_ts = 0.0
+
+
 # ─── Koneksi ──────────────────────────────────────────────────────────────────
 
 _gspread_client = None

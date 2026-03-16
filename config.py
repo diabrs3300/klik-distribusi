@@ -21,10 +21,20 @@ class Config:
         'diabrs3300': {
             'password_hash': generate_password_hash('youngcc2026'),
             'nama': 'DIA BRS 3300',
+            'akses_ihk': True,
+            'akses_ekspor_impor': True,
+            'akses_ntp': True,
+            'akses_transportasi': True,
+            'akses_pariwisata': True,
         },
         'duta0000': {
             'password_hash': generate_password_hash('duta0000'),
             'nama': 'Duta',
+            'akses_ihk': True,
+            'akses_ekspor_impor': True,
+            'akses_ntp': True,
+            'akses_transportasi': True,
+            'akses_pariwisata': True,
         },
     }
 

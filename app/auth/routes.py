@@ -14,18 +14,42 @@ def login():
         return redirect(url_for('main.dia_brs'))
 
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
+        username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '').strip()
 
-        user_data = current_app.config['USERS'].get(username)
-        if user_data and check_password_hash(user_data['password_hash'], password):
-            user = User(username=username, nama=user_data['nama'])
+        from app.services.sheets import get_users
+        users_sheet = get_users()
+        user_data = users_sheet.get(username)
+
+        is_valid = False
+        if user_data:
+            # User ditemukan di GSheets -> cek plaintext password
+            if user_data.get('password') == password:
+                is_valid = True
+        else:
+            # Fallback ke lokal config
+            user_data = current_app.config['USERS'].get(username)
+            if user_data and check_password_hash(user_data['password_hash'], password):
+                is_valid = True
+
+        if is_valid:
+            akses = {k: v for k, v in user_data.items() if k.startswith('akses_')}
+            user = User(username=username, nama=user_data['nama'], akses=akses)
             login_user(user)
             return redirect(url_for('main.dia_brs'))
 
         flash('Username atau password salah.', 'danger')
 
-    return render_template('auth/login.html', title='Login')
+    return render_template('auth/login.html')
+
+
+@auth.route('/refresh_users')
+def refresh_users():
+    """Route untuk membersihkan cache data user dari Google Sheets."""
+    from app.services.sheets import clear_users_cache
+    clear_users_cache()
+    flash('Data akun berhasil disinkronisasi ulang dengan Google Sheets.', 'success')
+    return redirect(url_for('auth.login'))
 
 
 @auth.route('/logout')

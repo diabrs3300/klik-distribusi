@@ -786,10 +786,8 @@ def _upsert_recap_sheet(worksheet: gspread.Worksheet, months_recap_data: dict) -
     new_rows = []
     
     for yymm, vals in months_recap_data.items():
-        try:
-            yymm_val = int(yymm)
-        except:
-            yymm_val = yymm
+        # Force string agar di Google Sheets dibaca sebagai text (menggunakan tanda petik tunggal)
+        yymm_val = f"{yymm}"
             
         if yymm in lookup:
             row_idx = lookup[yymm]

@@ -353,12 +353,12 @@ def download_template_ihk():
 # ─── Upload Ekspor-Impor ───────────────────────────────────────────────────────
 
 REQUIRED_EKSPOR_COLS = [
-    'YEAR', 'MTH', 'KODE_HS', 'PEL_MUAT', 'PODAL5',
-    'NGRTUJUAN', 'NEWCTRYCOD', 'NETTO', 'FOB', 'ORIG2', 'PROVORIG',
+    'YEAR', 'MTH', 'KODE_HS', 'PODAL5',
+    'NEWCTRYCOD', 'FOB'
 ]
 
 REQUIRED_IMPOR_COLS = [
-    'HS', 'K_NEGARA', 'N1225',
+    'HS', 'K_NEGARA'
 ]
 
 REQUIRED_IMPOR_EXCEL_COLS = [
@@ -366,8 +366,8 @@ REQUIRED_IMPOR_EXCEL_COLS = [
 ]
 
 REQUIRED_EKSPOR_EXCEL_COLS = [
-    'BLN_PROSES', 'THN_PROSES', 'PROVPOD', 'PELABUHAN', 
-    'KODE_HS', 'NEGARA', 'NETTO', 'FOB'
+    'BLN_PROSES', 'THN_PROSES', 'PELABUHAN', 
+    'KODE_HS', 'NEGARA', 'FOB'
 ]
 
 
@@ -473,15 +473,9 @@ def upload_ekspor_impor():
             'KODE_HS': 'KODE_HS',
             'PELABUHAN': 'PODAL5',
             'NEGARA': 'NEWCTRYCOD',
-            'NETTO': 'NETTO',
             'FOB': 'FOB'
         }
         df = df.rename(columns=mapping)
-        # Tambahkan kolom dummy yang diabaikan tapi mungkin dicek (required_cols)
-        if 'PEL_MUAT' not in df.columns: df['PEL_MUAT'] = ''
-        if 'NGRTUJUAN' not in df.columns: df['NGRTUJUAN'] = ''
-        if 'ORIG2' not in df.columns: df['ORIG2'] = ''
-        if 'PROVORIG' not in df.columns: df['PROVORIG'] = ''
         
         required_cols = REQUIRED_EKSPOR_COLS # Gunakan standard required cols setelah rename
 
@@ -517,8 +511,17 @@ def upload_ekspor_impor():
             # Tambahkan ke dataframe agar strukturnya sama dengan ekspor / excel impor
             df['YEAR'] = str(tahun)
             df['MTH'] = str(bulan).zfill(2)
+            
+            # Dinamis NMMYY
+            expected_n_col = f"N{str(bulan).zfill(2)}{str(tahun)[-2:]}"
+            
+            if expected_n_col not in df.columns:
+                flash(f'Kolom DBF Impor tidak lengkap. Kolom yang kurang: {expected_n_col}', 'danger')
+                return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+                
+            df = df.rename(columns={expected_n_col: 'N1225'})
 
-        required_cols = REQUIRED_IMPOR_COLS + ['YEAR', 'MTH']
+        required_cols = REQUIRED_IMPOR_COLS + ['N1225', 'YEAR', 'MTH']
 
     # ── Validasi kolom (General) ──────────────────────────────────────────────
     missing_cols = [c for c in required_cols if c not in df.columns]
@@ -584,7 +587,7 @@ def download_template_ekspor():
     from openpyxl.utils import get_column_letter
 
     COLS = REQUIRED_EKSPOR_COLS
-    SAMPLE = ['2025', '1', '0101', 'TANJUNG MAS', 'JT', 'USA', 'US', '1000.50', '5000.00', 'ID', 'JAWA TENGAH']
+    SAMPLE = ['2024', '1', '01061100', '33494', '516', '1436.400']
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -619,15 +622,15 @@ def download_template_ekspor():
     ws.row_dimensions[3].height = 30
 
     # Baris 4: Contoh data
-    sfill = PatternFill('solid', fgColor='ECFDF5')
-    sfont = Font(color='555555', italic=True, size=10)
+    # sfill = PatternFill('solid', fgColor='ECFDF5')
+    # sfont = Font(color='555555', italic=True, size=10)
     for ci, val in enumerate(SAMPLE, start=1):
         cell           = ws.cell(row=4, column=ci, value=val)
-        cell.fill      = sfill
-        cell.font      = sfont
+        # cell.fill      = sfill
+        # cell.font      = sfont
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    col_widths = [8, 6, 10, 16, 10, 14, 14, 12, 12, 8, 16]
+    col_widths = [8, 6, 10, 10, 14, 12]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A4'
@@ -655,7 +658,7 @@ def download_template_impor():
     from openpyxl.utils import get_column_letter
 
     COLS   = REQUIRED_IMPOR_EXCEL_COLS
-    SAMPLE = ['1', '2025', 'TANJUNG MAS', '0101.20.10', 'UNITED STATES', '450.00']
+    SAMPLE = ['1', '2024', '32129029', '516', '1186.0']
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -690,12 +693,12 @@ def download_template_impor():
     ws.row_dimensions[3].height = 30
 
     # Baris 4: Contoh data
-    sfill = PatternFill('solid', fgColor='EFF6FF')
-    sfont = Font(color='555555', italic=True, size=10)
+    # sfill = PatternFill('solid', fgColor='EFF6FF')
+    # sfont = Font(color='555555', italic=True, size=10)
     for ci, val in enumerate(SAMPLE, start=1):
         cell           = ws.cell(row=4, column=ci, value=val)
-        cell.fill      = sfill
-        cell.font      = sfont
+        # cell.fill      = sfill
+        # cell.font      = sfont
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
     col_widths = [8, 12, 16, 14, 16, 14]

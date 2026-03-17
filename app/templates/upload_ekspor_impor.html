@@ -21,7 +21,8 @@
                 <i class="bi bi-check-circle-fill fs-5" style="color:#0d9488;"></i>
                 <div class="flex-grow-1">
                     <strong>Upload Berhasil!</strong>
-                    Data Ekspor telah disinkronkan ke Google Sheets &mdash;
+                    Data {{ 'Impor' if active_tab == 'impor' else 'Ekspor' }} telah disinkronkan ke Google Sheets
+                    &mdash;
                     <span style="color:#0d9488;" class="fw-semibold">{{ stats.inserted }} baris baru</span>,
                     <span class="text-primary fw-semibold">{{ stats.updated }} baris diperbarui</span>.
                 </div>
@@ -29,7 +30,8 @@
                     data-bs-target="#uploadDetail" id="detailToggleBtn">
                     <i class="bi bi-chevron-down me-1"></i>Lihat Detail
                 </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="statsCloseBtn" title="Tutup">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="statsCloseBtn" title="Tutup"
+                    onclick="document.getElementById('statsCard').style.display='none'">
                     <i class="bi bi-x-lg"></i>
                 </button>
             </div>
@@ -195,7 +197,7 @@
                                 <p class="text-muted small mb-2"><strong>File DBF</strong> harus memiliki kolom:</p>
                                 <div class="d-flex flex-wrap gap-1 mb-3">
                                     {% for col in
-                                    ['YEAR','MTH','KODE_HS','PEL_MUAT','PODAL5','NGRTUJUAN','NEWCTRYCOD','NETTO','ORIG2','PROVORIG']
+                                    ['YEAR','MTH','KODE_HS','PODAL5','NEWCTRYCOD','FOB']
                                     %}
                                     <span class="badge rounded-pill px-2 py-1"
                                         style="background-color:#ccfbf1;color:#0d9488;font-size:0.75rem;">{{ col
@@ -206,14 +208,17 @@
                                 <p class="text-muted small mb-2"><strong>File Excel</strong> wajib memiliki kolom:</p>
                                 <div class="d-flex flex-wrap gap-1">
                                     {% for col in
-                                    ['BLN_PROSES','THN_PROSES','PROVPOD','PELABUHAN','KODE_HS','NEGARA','NETTO']
+                                    ['BLN_PROSES','THN_PROSES','PELABUHAN','KODE_HS','NEGARA','FOB']
                                     %}
                                     <span class="badge rounded-pill px-2 py-1"
                                         style="background-color:#ccfbf1;color:#0d9488;font-size:0.75rem;">{{ col
                                         }}</span>
                                     {% endfor %}
                                 </div>
-                                <!-- Template removed for DBF -->
+                                <hr class="my-3 text-muted">
+                                <a href="{{ url_for('main.download_template_ekspor') }}" class="btn btn-outline-info btn-sm fw-semibold w-100 mt-2">
+                                    <i class="bi bi-file-earmark-excel me-1"></i>Download Template Excel Ekspor
+                                </a>
                             </div>
                         </div>
                     </div>
@@ -327,7 +332,7 @@
                                 <p class="text-muted small mb-2"><strong>File DBF</strong> harus memiliki kolom:</p>
                                 <div class="d-flex flex-wrap gap-1 mb-3">
                                     {% for col in
-                                    ['HS','K_NEGARA','N1225']
+                                    ['HS','K_NEGARA','N[Bulan][Tahun]']
                                     %}
                                     <span class="badge rounded-pill px-2 py-1 bg-primary-subtle text-primary"
                                         style="font-size:0.75rem;">{{ col }}</span>
@@ -351,6 +356,10 @@
                                 <p class="text-muted small mb-0"><i class="bi bi-info-circle-fill text-info me-1"></i>
                                     Jika upload Excel, <strong>Tahun</strong> & <strong>Bulan</strong> akan dibaca
                                     otomatis dari file.</p>
+                                <hr class="my-3 text-muted">
+                                <a href="{{ url_for('main.download_template_impor') }}" class="btn btn-outline-primary btn-sm fw-semibold w-100 mt-2">
+                                    <i class="bi bi-file-earmark-excel me-1"></i>Download Template Excel Impor
+                                </a>
                             </div>
                         </div>
                     </div>

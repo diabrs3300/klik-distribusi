@@ -586,8 +586,8 @@ def download_template_ekspor():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    COLS = REQUIRED_EKSPOR_COLS
-    SAMPLE = ['2024', '1', '01061100', '33494', '516', '1436.400']
+    COLS = REQUIRED_EKSPOR_EXCEL_COLS
+    SAMPLE = ['1', '2024', '33494', '01061100', '516', '1436.400']
 
     wb = openpyxl.Workbook()
     ws = wb.active

@@ -593,39 +593,23 @@ def download_template_ekspor():
     ws = wb.active
     ws.title = 'Template Ekspor'
 
-    # Baris 1: Judul
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
-    title_cell = ws.cell(row=1, column=1, value='Template Upload Data Ekspor — DIA BRS')
-    title_cell.font      = Font(bold=True, size=12, color='FFFFFF')
-    title_cell.fill      = PatternFill('solid', fgColor='0D9488')
-    title_cell.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[1].height = 24
-
-    # Baris 2: Keterangan
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
-    note_cell = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-1. Isi data mulai baris ke-2.')
-    note_cell.font      = Font(italic=True, size=10, color='856404')
-    note_cell.fill      = PatternFill('solid', fgColor='FFF3CD')
-    note_cell.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[2].height = 18
-
-    # Baris 3: Header
+    # Baris 1: Header
     hfill  = PatternFill('solid', fgColor='0D9488')
     hfont  = Font(bold=True, color='FFFFFF', size=10)
     hbord  = Border(bottom=Side(style='medium', color='065F46'), right=Side(style='thin', color='CCCCCC'))
     for ci, col in enumerate(COLS, start=1):
-        cell            = ws.cell(row=3, column=ci, value=col)
+        cell            = ws.cell(row=1, column=ci, value=col)
         cell.font       = hfont
         cell.fill       = hfill
         cell.alignment  = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.border     = hbord
-    ws.row_dimensions[3].height = 30
+    ws.row_dimensions[1].height = 30
 
-    # Baris 4: Contoh data
+    # Baris 2: Contoh data
     # sfill = PatternFill('solid', fgColor='ECFDF5')
     # sfont = Font(color='555555', italic=True, size=10)
     for ci, val in enumerate(SAMPLE, start=1):
-        cell           = ws.cell(row=4, column=ci, value=val)
+        cell           = ws.cell(row=2, column=ci, value=val)
         # cell.fill      = sfill
         # cell.font      = sfont
         cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -633,7 +617,7 @@ def download_template_ekspor():
     col_widths = [8, 6, 10, 10, 14, 12]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = 'A4'
+    ws.freeze_panes = 'A2'
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -664,39 +648,23 @@ def download_template_impor():
     ws = wb.active
     ws.title = 'Template Impor'
 
-    # Baris 1: Judul
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
-    title_cell = ws.cell(row=1, column=1, value='Template Upload Data Impor — DIA BRS')
-    title_cell.font      = Font(bold=True, size=12, color='FFFFFF')
-    title_cell.fill      = PatternFill('solid', fgColor='1D4ED8')
-    title_cell.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[1].height = 24
-
-    # Baris 2: Keterangan
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(COLS))
-    note_cell = ws.cell(row=2, column=1, value='Header kolom WAJIB berada di BARIS KE-1. Isi data mulai baris ke-2.')
-    note_cell.font      = Font(italic=True, size=10, color='856404')
-    note_cell.fill      = PatternFill('solid', fgColor='FFF3CD')
-    note_cell.alignment = Alignment(horizontal='center', vertical='center')
-    ws.row_dimensions[2].height = 18
-
-    # Baris 3: Header
+    # Baris 1: Header
     hfill  = PatternFill('solid', fgColor='1D4ED8')
     hfont  = Font(bold=True, color='FFFFFF', size=10)
     hbord  = Border(bottom=Side(style='medium', color='1E3A8A'), right=Side(style='thin', color='CCCCCC'))
     for ci, col in enumerate(COLS, start=1):
-        cell            = ws.cell(row=3, column=ci, value=col)
+        cell            = ws.cell(row=1, column=ci, value=col)
         cell.font       = hfont
         cell.fill       = hfill
         cell.alignment  = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.border     = hbord
-    ws.row_dimensions[3].height = 30
+    ws.row_dimensions[1].height = 30
 
-    # Baris 4: Contoh data
+    # Baris 2: Contoh data
     # sfill = PatternFill('solid', fgColor='EFF6FF')
     # sfont = Font(color='555555', italic=True, size=10)
     for ci, val in enumerate(SAMPLE, start=1):
-        cell           = ws.cell(row=4, column=ci, value=val)
+        cell           = ws.cell(row=2, column=ci, value=val)
         # cell.fill      = sfill
         # cell.font      = sfont
         cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -704,7 +672,7 @@ def download_template_impor():
     col_widths = [8, 12, 16, 14, 16, 14]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = 'A4'
+    ws.freeze_panes = 'A2'
 
     buf = io.BytesIO()
     wb.save(buf)

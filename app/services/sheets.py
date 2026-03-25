@@ -3,436 +3,295 @@ Google Sheets Service — IHK Upload
 Mengelola koneksi dan operasi tulis ke Google Sheets via service account.
 """
 
-import os
-import logging
-
-_log = logging.getLogger(__name__)
 import gspread
 import time
+import logging
+import os
+from collections import OrderedDict
+from google.oauth2.service_account import Credentials
 from gspread.utils import rowcol_to_a1
 from gspread.exceptions import APIError
-from google.oauth2.service_account import Credentials
+from app.main.brs_cols import BRS_CONFIG
 
-# ─── Global Progress Tracking ─────────────────────────────────────────────────
-# Menyimpan status progress upload Excel/DBF secara kasat-mata ke frontend via AJAX
-# Format: { "task_id": {"percent": 0~100, "message": "Memproses..."} }
-UPLOAD_PROGRESS = {}
+
+_log = logging.getLogger(__name__)
+
+# ─── Global Progress & Cache ──────────────────────────────────────────────────
+UPLOAD_PROGRESS = {}  # { task_id: {"percent": 0~100, "message": "..."} }
+_gspread_client = None
+
+# Cache for document registry, portal links, and users
+_CACHES = {
+    'docs':  {'data': {}, 'ts': {}},  # {section: list}
+    'klik':  {'data': None, 'ts': 0.0},
+    'users': {'data': {}, 'ts': 0.0}
+}
 
 def set_progress(task_id: str, percent: int, message: str):
-    if not task_id:
-        return
-    # Pastikan nilai 0-100
-    percent = max(0, min(100, percent))
+    if not task_id: return
     UPLOAD_PROGRESS[task_id] = {
-        "percent": percent,
+        "percent": max(0, min(100, percent)),
         "message": message
     }
 
 def get_progress(task_id: str) -> dict:
-    if not task_id or task_id not in UPLOAD_PROGRESS:
-        return {"percent": 0, "message": "Menunggu respon server..."}
-    return UPLOAD_PROGRESS[task_id]
+    return UPLOAD_PROGRESS.get(task_id, {"percent": 0, "message": "Menunggu respon server..."})
 
 def clear_progress(task_id: str):
-    if task_id in UPLOAD_PROGRESS:
-        del UPLOAD_PROGRESS[task_id]
+    UPLOAD_PROGRESS.pop(task_id, None)
 
-# ─── Konstanta ────────────────────────────────────────────────────────────────
+# ─── Generic Cache Helper ─────────────────────────────────────────────────────
 
-IHK_SPREADSHEET_ID = '1iB0DMQw7kjVzl5PgrVsb1wtQIlRF3QL-pZHYmQ0JySQ'
-EKSPOR_IMPOR_SPREADSHEET_ID = '15FRr5c0HuhED1DpyMwfy6xXCxDXDXGMSiMYrk3a0ui0'
-IMPOR_SPREADSHEET_ID = '1a3h0w4zE_kdvszM15H_UPWQ76QykSADIGOY-zXyTqzc'
+def _get_cached_data(cache_key: str, fetch_func, sub_key: str = None):
+    """Generic helper to handle TTL caching for GSheets data."""
+    from app.constants import DOCS_CACHE_TTL
+    now = time.time()
+    cache = _CACHES[cache_key]
+    
+    # Handle nested cache (like 'docs' per section)
+    if sub_key is not None:
+        if sub_key in cache['data'] and (now - cache['ts'].get(sub_key, 0)) < DOCS_CACHE_TTL:
+            return cache['data'][sub_key]
+        
+        data = fetch_func()
+        if data is not None:
+            cache['data'][sub_key] = data
+            cache['ts'][sub_key] = now
+        return data or []
+    
+    # Handle single cache (like 'klik' or 'users')
+    if cache['data'] is not None and (now - cache['ts']) < DOCS_CACHE_TTL:
+        return cache['data']
+        
+    data = fetch_func()
+    if data is not None:
+        cache['data'] = data
+        cache['ts'] = now
+    return data or ({} if cache_key == 'users' else [])
 
-# ─── KUSTOMISASI MAPPING ──────────────────────────────────────────────────────
-#
-# Format: 'Nama kolom di file Excel' : 'Nama sheet di Google Sheets'
-#
-# Sesuaikan bagian kanan (nama sheet) dengan nama sheet ASLI di spreadsheet kamu.
-# Nama sheet bersifat case-sensitive!
-#
-SHEET_VALUE_MAP = {
-    'IHK':        'IHK',          # kolom Excel "IHK"        → sheet "IHK"
-    'Inflasi MtM': 'MTM',         # kolom Excel "Inflasi MtM" → sheet "MTM"
-    'Inflasi YtD': 'YTD',         # kolom Excel "Inflasi YtD" → sheet "YTD"
-    'Inflasi YoY': 'YOY',         # kolom Excel "Inflasi YoY" → sheet "YOY"
-    'Andil MtM':   'AMTM',        # kolom Excel "Andil MtM"  → sheet "AMTM"
-    'Andil YtD':   'AYTD',        # kolom Excel "Andil YtD"  → sheet "AYTD"
-    'Andil YoY':   'AYOY',        # kolom Excel "Andil YoY"  → sheet "AYOY"
-    'NK':   'NK',                 # kolom Excel "NK"  → sheet "NK"
-}
-#
-# ──────────────────────────────────────────────────────────────────────────────
+# Spreadsheet IDs are now in app.constants
 
-# Kolom tetap di setiap sheet Google Sheets (header row 3)
-FIXED_COLS = ['Kd.Kota', 'Nama Kota', 'Kode', 'Nama Komoditas', 'Flag']
+# ─── KUSTOMISASI IHK MAPPING ──────────────────────────────────────────────────
+# Mapping dari BRS_CONFIG
+SHEET_VALUE_MAP = {k: v for k, v in BRS_CONFIG['ihk']['required_cols'].items() if v in BRS_CONFIG['ihk']['sheets']}
+FIXED_COLS = [v for k, v in BRS_CONFIG['ihk']['required_cols'].items() if v not in BRS_CONFIG['ihk']['sheets'] and k not in ('Tahun', 'Bulan')] + list(BRS_CONFIG['ihk']['optional_cols'].values())
 
-# Path credentials.json relatif terhadap root project
-CREDS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    'credentials.json'
-)
-
+CREDS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'credentials.json')
 SCOPES = [
     'https://spreadsheets.google.com/feeds',
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive',
 ]
 
-
-# ─── Registry Dokumen (fetch dari GSheets dengan TTL cache) ───────────────────
-
-import time as _time
-
-_docs_cache: dict       = {}   # {section_key: list[dict]}
-_docs_cache_ts: dict    = {}   # {section_key: float (unix timestamp)}
-
+# ─── Registry Dokumen ─────────────────────────────────────────────────────────
 
 def get_docs(section: str, fallback: list) -> list:
-    """
-    Ambil daftar dokumen untuk section BRS dari Google Sheets registry.
+    """Ambil daftar dokumen untuk section BRS dari Google Sheets registry."""
+    from app.constants import DOCS_SPREADSHEET_ID, DOCS_SHEET_MAP
 
-    - section  : kunci dari DOCS_SHEET_MAP (misal 'IHK', 'NTP', ...)
-    - fallback : list yang digunakan jika GSheets tidak bisa diakses.
-
-    Data di-cache selama DOCS_CACHE_TTL detik.
-
-    Format baris di Google Sheets (header baris 1, data mulai baris 2):
-        Kolom A : Nama Dokumen
-        Kolom B : Kategori  (misal: 'Master', 'BRS', 'Folder')
-        Kolom C : Deskripsi
-        Kolom D : Link
-
-    Return — list of category groups:
-        [{'kategori': 'Master', 'icon': 'bi-pencil-fill',
-          'items': [{'label', 'desc', 'url', 'icon'}, ...]}, ...]
-    """
-    from app.constants import (
-        DOCS_SPREADSHEET_ID, DOCS_SHEET_MAP, DOCS_CACHE_TTL,
-    )
-
-    if not DOCS_SPREADSHEET_ID:
-        return fallback
-
+    if not DOCS_SPREADSHEET_ID: return fallback
     sheet_name = DOCS_SHEET_MAP.get(section)
-    if not sheet_name:
-        return fallback
+    if not sheet_name: return fallback
 
-    cache_key = section
-    now       = _time.time()
-
-    if cache_key in _docs_cache and (now - _docs_cache_ts.get(cache_key, 0)) < DOCS_CACHE_TTL:
-        return _docs_cache[cache_key]
-
-    # Icon per kategori (header group & item)
-    _KAT_ICON = {
-        'master' : 'bi-pencil-fill',
-        'brs'    : 'bi-file-earmark-text-fill',
-        'folder' : 'bi-folder2-open',
-    }
-    _ITEM_ICON = {
-        'master' : 'bi-file-earmark-excel-fill',
-        'brs'    : 'bi-file-earmark-text',
-        'folder' : 'bi-folder',
-    }
-
-    try:
-        spreadsheet = _get_spreadsheet(DOCS_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(sheet_name)
-
-        rows = worksheet.get_all_values()
-        if not rows:
-            return fallback
-
-        header = [h.strip().lower() for h in rows[0]]
-        
-        # Mapping index kolom secara dinamis
-        def _get_idx(names: list, default: int) -> int:
-            for name in names:
-                if name.lower() in header:
-                    return header.index(name.lower())
-            return default
-
-        idx_label = _get_idx(['nama dokumen', 'label', 'nama'], 0)
-        idx_kat   = _get_idx(['kategori', 'category', 'group'], 1)
-        idx_desc  = _get_idx(['deskripsi', 'description', 'desc'], 2)
-        idx_url   = _get_idx(['link', 'url'], 3)
-
-        from collections import OrderedDict
-        grouped = OrderedDict()
-
-        for row in rows[1:]:
-            if not any(row):
-                continue
+    def _fetch():
+        try:
+            spreadsheet = _get_spreadsheet(DOCS_SPREADSHEET_ID)
+            worksheet = spreadsheet.worksheet(sheet_name)
+            rows = worksheet.get_all_values()
+            if not rows or len(rows) < 2: return None
             
-            label    = row[idx_label].strip() if len(row) > idx_label else ''
-            kategori = row[idx_kat].strip() if len(row) > idx_kat else 'Lainnya'
-            desc     = row[idx_desc].strip() if len(row) > idx_desc else ''
-            url      = row[idx_url].strip() if len(row) > idx_url else ''
+            header = [h.strip().lower() for h in rows[0]]
+            
+            def _idx(names, default):
+                for n in names:
+                    if n in header: return header.index(n)
+                return default
 
-            if not label:
-                continue
+            idx_label = _idx(['nama dokumen', 'label', 'nama'], 0)
+            idx_kat   = _idx(['kategori', 'category', 'group'], 1)
+            idx_desc  = _idx(['deskripsi', 'description', 'desc'], 2)
+            idx_url   = _idx(['link', 'url'], 3)
 
-            kat_key   = kategori.lower()
-            item_icon = _ITEM_ICON.get(kat_key, 'bi-box-arrow-up-right')
+            grouped = OrderedDict()
+            kat_icons = {'master': 'bi-pencil-fill', 'brs': 'bi-file-earmark-text-fill', 'folder': 'bi-folder2-open'}
+            item_icons = {'master': 'bi-file-earmark-excel-fill', 'brs': 'bi-file-earmark-text', 'folder': 'bi-folder'}
 
-            if kategori not in grouped:
-                grouped[kategori] = []
-            grouped[kategori].append({
-                'label': label,
-                'desc' : desc,
-                'url'  : url,
-                'icon' : item_icon,
-            })
+            for row in rows[1:]:
+                if not any(row): continue
+                label = row[idx_label].strip() if len(row) > idx_label else ''
+                if not label: continue
+                
+                kat = row[idx_kat].strip() if len(row) > idx_kat else 'Lainnya'
+                desc = row[idx_desc].strip() if len(row) > idx_desc else ''
+                url = row[idx_url].strip() if len(row) > idx_url else ''
+                
+                if kat not in grouped: grouped[kat] = []
+                grouped[kat].append({
+                    'label': label, 'desc': desc, 'url': url,
+                    'icon': item_icons.get(kat.lower(), 'bi-box-arrow-up-right')
+                })
 
-        result = [
-            {
-                'kategori': kat,
-                'icon'    : _KAT_ICON.get(kat.lower(), 'bi-collection'),
-                'dokumen' : dok,
-            }
-            for kat, dok in grouped.items()
-        ]
+            return [
+                {'kategori': k, 'icon': kat_icons.get(k.lower(), 'bi-collection'), 'dokumen': d}
+                for k, d in grouped.items()
+            ]
+        except Exception as e:
+            _log.error(f'get_docs({section}) error: {e}')
+            return None
 
-        _docs_cache[cache_key]    = result
-        _docs_cache_ts[cache_key] = now
-        return result
-
-    except Exception as e:
-        _log.error('get_docs(%s) error: %s', section, e, exc_info=True)
-        return fallback
-
+    return _get_cached_data('docs', _fetch, sub_key=section) or fallback
 
 def clear_docs_cache(section: str = None):
-    """
-    Paksa refresh cache pada request berikutnya.
-    Jika section=None, clear semua cache.
-    """
+    """Paksa refresh cache registry dokumen."""
     if section:
-        _docs_cache.pop(section, None)
-        _docs_cache_ts.pop(section, None)
+        _CACHES['docs']['data'].pop(section, None)
+        _CACHES['docs']['ts'].pop(section, None)
     else:
-        _docs_cache.clear()
-        _docs_cache_ts.clear()
+        _CACHES['docs']['data'].clear()
+        _CACHES['docs']['ts'].clear()
 
 
-# ─── Klik Distribusi (fetch link portal dari GSheets) ─────────────────────────
-
-_klik_cache: list = []
-_klik_cache_ts: float = 0.0
-
-_JENIS_ICON = {
-    'internal app'  : 'bi-shield-lock',
-    'dashboard'     : 'bi-speedometer2',
-    'drive bps'     : 'bi-cloud-fill',
-    'g-drive'       : 'bi-folder2-open',
-    'g-sheets'      : 'bi-grid-3x3-gap-fill',
-    'web app'       : 'bi-globe',
-    'web entry'     : 'bi-keyboard',
-    'website'       : 'bi-window',
-}
-
-_KATEGORI_COLOR = {
-    'Utama'                        : 'primary',
-    'Monitoring'                   : 'success',
-    'Statistik Harga'              : 'danger',
-    'Statistik Distribusi dan Jasa': 'purple',
-    'Lainnya'                      : 'secondary',
-}
-
+# ─── Klik Distribusi ──────────────────────────────────────────────────────────
 
 def get_klik_links() -> list:
-    """
-    Fetch daftar link dari sheet 'Klik' di DOCS_SPREADSHEET_ID.
-    Return list of dict per kategori:
-      [{'kategori': 'SHK', 'color': 'danger', 'items': [{'nama', 'link', 'jenis', 'icon', 'keterangan'}, ...]}, ...]
-    Di-cache selama DOCS_CACHE_TTL detik.
-    Jika gagal, kembalikan list kosong.
-    """
-    from app.constants import KLIK_SPREADSHEET_ID, DOCS_CACHE_TTL
+    """Fetch daftar link portal dari Google Sheets."""
 
-    global _klik_cache, _klik_cache_ts
+    if not KLIK_SPREADSHEET_ID: return []
 
-    if not KLIK_SPREADSHEET_ID:
-        return []
-
-    now = _time.time()
-    if _klik_cache and (now - _klik_cache_ts) < DOCS_CACHE_TTL:
-        return _klik_cache
-
-    try:
-        spreadsheet = _get_spreadsheet(KLIK_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet('Klik')
-        rows = worksheet.get_all_values()  # baris 1 = header
-        if not rows:
-            return []
+    def _fetch():
+        try:
+            spreadsheet = _get_spreadsheet(KLIK_SPREADSHEET_ID)
+            worksheet = spreadsheet.worksheet('Klik')
+            rows = worksheet.get_all_values()
+            if not rows or len(rows) < 2: return None
             
-        header = [h.strip().lower() for h in rows[0]]
-        
-        # Mapping index kolom secara dinamis
-        def _get_idx(names: list[str], default: int) -> int:
-            for name in names:
-                if name in header:
-                    return header.index(name)
-            return default
+            header = [h.strip().lower() for h in rows[0]]
+            def _idx(names, default):
+                for n in names:
+                    if n in header: return header.index(n)
+                return default
 
-        idx_kat  = _get_idx(['kategori', 'group'], 0)
-        idx_nama = _get_idx(['nama', 'label', 'title'], 1)
-        idx_link = _get_idx(['link', 'url'], 2)
-        idx_jns  = _get_idx(['jenis', 'type'], 3)
-        idx_kw   = _get_idx(['keyword', 'kata kunci'], 4)
-        idx_ket  = _get_idx(['keterangan', 'desc', 'description'], 5)
-        idx_thn  = _get_idx(['tahun', 'year', 'thn', 'periode'], 6)
+            idx_kat  = _idx(['kategori', 'group'], 0)
+            idx_nama = _idx(['nama', 'label', 'title'], 1)
+            idx_link = _idx(['link', 'url'], 2)
+            idx_jns  = _idx(['jenis', 'type'], 3)
+            idx_ket  = _idx(['keterangan', 'desc', 'description'], 5)
+            idx_thn  = _idx(['tahun', 'year', 'thn', 'periode'], 6)
 
-        # Kumpulkan item per kategori (pertahankan urutan kemunculan)
-        from collections import OrderedDict
-        grouped = OrderedDict()
-
-        for row in rows[1:]:               # skip header
-            if not any(row):
-                continue
-            
-            kategori    = row[idx_kat].strip() if len(row) > idx_kat else ''
-            nama        = row[idx_nama].strip() if len(row) > idx_nama else ''
-            link        = row[idx_link].strip() if len(row) > idx_link else '#'
-            jenis       = row[idx_jns].strip() if len(row) > idx_jns else ''
-            keyword     = row[idx_kw].strip() if len(row) > idx_kw else ''
-            keterangan  = row[idx_ket].strip() if len(row) > idx_ket else ''
-            tahun_raw   = row[idx_thn].strip() if len(row) > idx_thn else ''
-
-            if not nama:
-                continue
-
-            # Konversi tahun ke int jika memungkinkan
-            try:
-                tahun = int(float(tahun_raw)) if tahun_raw else None
-            except (ValueError, TypeError):
-                tahun = None
-
-            icon = _JENIS_ICON.get(jenis.lower(), 'bi-box-arrow-up-right')
-
-            if kategori not in grouped:
-                grouped[kategori] = []
-            grouped[kategori].append({
-                'nama'      : nama,
-                'link'      : link,
-                'jenis'     : jenis,
-                'icon'      : icon,
-                'keyword'   : keyword,
-                'keterangan': keterangan,
-                'tahun'     : tahun,
-            })
-
-        result = [
-            {
-                'kategori': kat,
-                'color'   : _KATEGORI_COLOR.get(kat, 'secondary'),
-                'links'   : links,
+            grouped = OrderedDict()
+            jenis_icons = {
+                'internal app': 'bi-shield-lock', 'dashboard': 'bi-speedometer2',
+                'drive bps': 'bi-cloud-fill', 'g-drive': 'bi-folder2-open',
+                'g-sheets': 'bi-grid-3x3-gap-fill', 'web app': 'bi-globe',
+                'web entry': 'bi-keyboard', 'website': 'bi-window',
             }
-            for kat, links in grouped.items()
-        ]
+            kat_colors = {
+                'Utama': 'primary', 'Monitoring': 'success', 'Statistik Harga': 'danger',
+                'Statistik Distribusi dan Jasa': 'purple', 'Lainnya': 'secondary',
+            }
 
-        _klik_cache    = result
-        _klik_cache_ts = now
-        return result
+            for row in rows[1:]:
+                if not any(row): continue
+                nama = row[idx_nama].strip() if len(row) > idx_nama else ''
+                if not nama: continue
 
-    except Exception:
-        return _klik_cache or []   # kembalikan cache lama jika ada, atau kosong
+                kat = row[idx_kat].strip() if len(row) > idx_kat else 'Lainnya'
+                jenis = row[idx_jns].strip() if len(row) > idx_jns else ''
+                tahun_raw = row[idx_thn].strip() if len(row) > idx_thn else ''
+                
+                try:
+                    tahun = int(float(tahun_raw)) if tahun_raw else None
+                except (ValueError, TypeError):
+                    tahun = None
+
+                if kat not in grouped: grouped[kat] = []
+                grouped[kat].append({
+                    'nama': nama,
+                    'link': row[idx_link].strip() if len(row) > idx_link else '#',
+                    'jenis': jenis,
+                    'icon': jenis_icons.get(jenis.lower(), 'bi-box-arrow-up-right'),
+                    'keterangan': row[idx_ket].strip() if len(row) > idx_ket else '',
+                    'tahun': tahun,
+                })
+
+            return [
+                {'kategori': k, 'color': kat_colors.get(k, 'secondary'), 'links': d}
+                for k, d in grouped.items()
+            ]
+        except Exception as e:
+            _log.error(f'get_klik_links() error: {e}')
+            return None
+
+def clear_klik_cache():
+    """Paksa refresh cache Klik Distribusi."""
+    _CACHES['klik']['data'] = None
+    _CACHES['klik']['ts'] = 0.0
 
 
-# ─── Data User dari GSheets ───────────────────────────────────────────────────
-
-_users_cache: dict = {}
-_users_cache_ts: float = 0.0
+# ─── Data User ────────────────────────────────────────────────────────────────
 
 def get_users() -> dict:
-    """
-    Fetch daftar user dari Google Sheets.
-    Return dict: {'username': {'password': '...', 'nama': '...', 'akses_ihk': True, ...}}
-    Di-cache selama DOCS_CACHE_TTL detik.
-    Jika gagal, kembalikan dictionary kosong (akan fallback ke config.USERS).
-    """
-    from app.constants import USERS_SPREADSHEET_ID, USERS_SHEET_NAME, DOCS_CACHE_TTL
-    global _users_cache, _users_cache_ts
+    """Fetch daftar user dan hak akses dari Google Sheets."""
+    from app.constants import USERS_SPREADSHEET_ID, USERS_SHEET_NAME
+    if not USERS_SPREADSHEET_ID: return {}
 
-    if not USERS_SPREADSHEET_ID:
-        return {}
+    def _fetch():
+        try:
+            spreadsheet = _get_spreadsheet(USERS_SPREADSHEET_ID)
+            worksheet = spreadsheet.worksheet(USERS_SHEET_NAME)
+            rows = worksheet.get_all_values()
+            if not rows or len(rows) < 2: return None
 
-    now = _time.time()
-    if _users_cache and (now - _users_cache_ts) < DOCS_CACHE_TTL:
-        return _users_cache
+            header = [str(h).strip().lower() for h in rows[0]]
+            def _idx(names):
+                for n in names:
+                    if n in header: return header.index(n)
+                return -1
 
-    try:
-        spreadsheet = _get_spreadsheet(USERS_SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(USERS_SHEET_NAME)
-        rows = worksheet.get_all_values()
-        
-        if not rows or len(rows) < 2:
-            return {}
+            idx_user  = _idx(['username', 'user'])
+            idx_nama  = _idx(['nama', 'name'])
+            idx_pass  = _idx(['password', 'sandi'])
+            idx_ihk   = _idx(['akses ihk', 'ihk'])
+            idx_exim  = _idx(['akses ekspor impor', 'akses exim', 'ekspor impor', 'exim'])
+            idx_ntp   = _idx(['akses ntp', 'ntp'])
+            idx_trans = _idx(['akses transportasi', 'transportasi'])
+            idx_pari  = _idx(['akses pariwisata', 'pariwisata'])
 
-        header = [str(h).strip().lower() for h in rows[0]]
-        
-        def _get_idx(names: list[str]) -> int:
-            for name in names:
-                if name in header:
-                    return header.index(name)
-            return -1
+            if idx_user == -1 or idx_pass == -1:
+                _log.error("Kolom 'Username' atau 'Password' tidak ditemukan.")
+                return None
 
-        idx_user   = _get_idx(['username', 'user'])
-        idx_nama   = _get_idx(['nama', 'name'])
-        idx_pass   = _get_idx(['password', 'sandi'])
-        idx_ihk    = _get_idx(['akses ihk', 'ihk'])
-        idx_exim   = _get_idx(['akses ekspor impor', 'akses exim', 'ekspor impor', 'exim'])
-        idx_ntp    = _get_idx(['akses ntp', 'ntp'])
-        idx_trans  = _get_idx(['akses transportasi', 'transportasi'])
-        idx_pari   = _get_idx(['akses pariwisata', 'pariwisata'])
-
-        if idx_user == -1 or idx_pass == -1:
-            _log.error("Kolom 'Username' atau 'Password' tidak ditemukan di sheet user.")
-            return {}
-
-        users_dict = {}
-
-        def _is_true(val: str) -> bool:
-            return str(val).strip().upper() == 'TRUE'
-
-        for row in rows[1:]:
-            if not any(row):
-                continue
-
-            # Ambil nilai berdasarkan index
-            username_raw = row[idx_user].strip() if len(row) > idx_user else ''
-            nama_asli    = row[idx_nama].strip() if idx_nama != -1 and len(row) > idx_nama else username_raw
-            password     = row[idx_pass].strip() if len(row) > idx_pass else ''
-            
-            if not username_raw or not password:
-                continue
+            users_dict = {}
+            for row in rows[1:]:
+                if not any(row): continue
+                username_raw = row[idx_user].strip()
+                password = row[idx_pass].strip()
+                if not username_raw or not password: continue
                 
-            # Username di-lowercase untuk mempermudah pencocokan saat login
-            username = username_raw.lower()
+                username = username_raw.lower()
+                def _bool(idx):
+                    return str(row[idx]).strip().upper() == 'TRUE' if idx != -1 and len(row) > idx else False
 
-            users_dict[username] = {
-                'nama'              : nama_asli,
-                'password'          : password, # Plaintext!
-                'akses_ihk'         : _is_true(row[idx_ihk]) if idx_ihk != -1 and len(row) > idx_ihk else False,
-                'akses_ekspor_impor': _is_true(row[idx_exim]) if idx_exim != -1 and len(row) > idx_exim else False,
-                'akses_ntp'         : _is_true(row[idx_ntp]) if idx_ntp != -1 and len(row) > idx_ntp else False,
-                'akses_transportasi': _is_true(row[idx_trans]) if idx_trans != -1 and len(row) > idx_trans else False,
-                'akses_pariwisata'  : _is_true(row[idx_pari]) if idx_pari != -1 and len(row) > idx_pari else False,
-            }
+                users_dict[username] = {
+                    'nama': row[idx_nama].strip() if idx_nama != -1 and len(row) > idx_nama else username_raw,
+                    'password': password,
+                    'akses_ihk': _bool(idx_ihk),
+                    'akses_ekspor_impor': _bool(idx_exim),
+                    'akses_ntp': _bool(idx_ntp),
+                    'akses_transportasi': _bool(idx_trans),
+                    'akses_pariwisata': _bool(idx_pari),
+                }
+            return users_dict
+        except Exception as e:
+            _log.error(f'get_users() error: {e}')
+            return None
 
-        _users_cache = users_dict
-        _users_cache_ts = now
-        return users_dict
-
-    except Exception as e:
-        _log.error('get_users() error: %s', e, exc_info=True)
-        return _users_cache or {}
+    return _get_cached_data('users', _fetch)
 
 def clear_users_cache():
-    """Paksa refresh cache user pada request berikutnya."""
-    global _users_cache, _users_cache_ts
-    _users_cache.clear()
-    _users_cache_ts = 0.0
+    """Paksa refresh cache user."""
+    _CACHES['users']['data'] = {}
+    _CACHES['users']['ts'] = 0.0
 
 
 # ─── Koneksi ──────────────────────────────────────────────────────────────────
@@ -578,110 +437,95 @@ def _build_row_lookup(data_rows: list[list[str]], col_indices: dict[str, int]) -
             lookup_table[(str(kode_kota).strip(), str(kode_komoditas).strip())] = i
     return lookup_table
 
-def _upsert_ihk_sheet(
-    worksheet: gspread.Worksheet,
-    dataframe,
-    col_name: str,
-    excel_col_name: str,
-) -> tuple[int, int]:
-    """
-    Insert/update data dari DataFrame ke worksheet IHK `worksheet`.
+def _create_ihk_row(row, col_indices, row_width, val_col_idx, cell_value):
+    """Helper to build a single IHK data row based on BRS_CONFIG mapping."""
+    row_data = [''] * row_width
+    kd_cola = BRS_CONFIG['ihk']['keys'][0]
+    kd_colb = BRS_CONFIG['ihk']['keys'][1]
     
-    Args:
-        worksheet: Gspread Worksheet instance
-        dataframe: Pandas DataFrame containing IHK values
-        col_name: kode YYMM (misal '2608') untuk header kolom
-        excel_col_name: nama kolom asal di DataFrame excel (misal 'IHK', 'Inflasi MtM', dst.)
+    def _set(col_key, val):
+        idx = col_indices.get(col_key)
+        if idx is not None and idx < row_width:
+            row_data[idx] = val
+
+    # Set required columns
+    _set(BRS_CONFIG['ihk']['required_cols'][kd_cola], str(row.get(kd_cola, '')).strip())
+    _set(BRS_CONFIG['ihk']['required_cols'][kd_colb], str(row.get(kd_colb, '')).strip())
+    
+    # Set other fixed and optional columns
+    for ex_col, sh_col in BRS_CONFIG['ihk']['required_cols'].items():
+        if sh_col in FIXED_COLS and ex_col not in BRS_CONFIG['ihk']['keys'] and ex_col not in ('Tahun', 'Bulan'):
+            _set(sh_col, str(row.get(ex_col, '')).strip())
+            
+    for ex_col, sh_col in BRS_CONFIG['ihk']['optional_cols'].items():
+        _set(sh_col, str(row.get(ex_col, '')).strip())
+    
+    # Set the actual value for the current period
+    if val_col_idx < row_width:
+        row_data[val_col_idx] = cell_value
         
-    Returns:
-        tuple (inserted_rows_count, updated_rows_count)
-    """
+    return row_data
+
+def _upsert_ihk_sheet(worksheet: gspread.Worksheet, dataframe, col_name: str, excel_col_name: str) -> tuple[int, int]:
+    """Insert/update data dari DataFrame ke worksheet IHK."""
     all_values = worksheet.get_all_values()
     header_row = all_values[2] if len(all_values) > 2 else []
     col_indices = {name: _col_index(header_row, name) for name in FIXED_COLS}
 
-    # Cari/buat kolom YYMM dan ambil data terbaru
+    # 1. Ensure period column exists
     val_col_1based, is_new = find_or_create_col(worksheet, header_row, col_name)
+    val_col_idx = val_col_1based - 1
     
     if is_new:
-        # Tentukan nomor urut dari baris ke-4
         row4 = all_values[3] if len(all_values) > 3 else []
         num_filled = sum(1 for x in row4 if str(x).strip())
-        next_num = num_filled + 1
-        
         worksheet.batch_update([
             {'range': rowcol_to_a1(3, val_col_1based), 'values': [[col_name]]},
-            {'range': rowcol_to_a1(4, val_col_1based), 'values': [[next_num]]},
+            {'range': rowcol_to_a1(4, val_col_1based), 'values': [[num_filled + 1]]},
         ])
-        # Update LOCAL representation agar tidak perlu get_all_values() lagi
-        # Kita hanya perlu memastikan baris data yang diambil benar.
-        # Karena kita hanya tambah KOLOM di header, baris data tidak bergeser.
-        # Namun untuk safety, kita tambahkan dummy value ke header agar index valid.
-        while len(header_row) < val_col_1based:
-            header_row.append('')
-        header_row[val_col_1based-1] = col_name
+        while len(header_row) < val_col_1based: header_row.append('')
+        header_row[val_col_idx] = col_name
 
-    # all_values = worksheet.get_all_values() # DIHAPUS: Mengurangi 1 Read Request per sheet
-
+    # 2. Build lookup and process data
     data_rows = all_values[4:] 
     lookup = _build_row_lookup(data_rows, col_indices)
-
-    batch_updates = []
-    new_rows = []
-    inserted_count = 0
-    updated_count = 0
-
+    
+    batch_updates, new_rows = [], []
+    inserted_count = updated_count = 0
     max_col_0 = max((v for v in col_indices.values() if v is not None), default=0)
-    row_width = max(max_col_0, val_col_1based - 1) + 1
+    row_width = max(max_col_0, val_col_idx) + 1
 
+    kd_cola, kd_colb = BRS_CONFIG['ihk']['keys']
+    
     for _, row in dataframe.iterrows():
-        kd_kota = str(row.get('Kode Kota', '')).strip()
-        kode_komoditas = str(row.get('Kode Komoditas', '')).strip()
+        kd_kota = str(row.get(kd_cola, '')).strip()
+        kd_komo = str(row.get(kd_colb, '')).strip()
         cell_value = _to_number(row.get(excel_col_name, ''))
-
-        key = (kd_kota, kode_komoditas)
+        key = (kd_kota, kd_komo)
 
         if key in lookup:
-            row_idx = lookup[key]
             batch_updates.append({
-                'range': rowcol_to_a1(row_idx, val_col_1based),
+                'range': rowcol_to_a1(lookup[key], val_col_1based),
                 'values': [[cell_value]],
             })
             updated_count += 1
         else:
-            row_data = [''] * row_width
-            
-            def _set(col_key: str, val: str):
-                idx = col_indices.get(col_key)
-                if idx is not None and idx < row_width:
-                    row_data[idx] = val
-
-            _set('Kd.Kota', kd_kota)
-            _set('Nama Kota', str(row.get('Nama Kota', '')).strip())
-            _set('Kode', kode_komoditas)
-            _set('Nama Komoditas', str(row.get('Nama Komoditas', '')).strip())
-            _set('Flag', str(row.get('Flag', '')).strip())
-            
-            if val_col_1based - 1 < row_width:
-                row_data[val_col_1based - 1] = cell_value
-
-            new_rows.append(row_data)
-            next_row = 5 + len(data_rows) + len(new_rows) - 1
-            lookup[key] = next_row
+            new_row = _create_ihk_row(row, col_indices, row_width, val_col_idx, cell_value)
+            new_rows.append(new_row)
+            lookup[key] = 5 + len(data_rows) + len(new_rows) - 1
             inserted_count += 1
 
+    # 3. Execute updates
     if batch_updates:
         worksheet.batch_update(batch_updates)
 
     if new_rows:
-        next_empty_row = max(len(all_values) + 1, 5)
-        last_needed_row = next_empty_row + len(new_rows) - 1
-
-        if last_needed_row > worksheet.row_count:
-            worksheet.add_rows(last_needed_row - worksheet.row_count + 200)
-
-        # Optimasi: Gunakan satu range update alih-alih batch_update baris demi baris
-        range_name = f"{rowcol_to_a1(next_empty_row, 1)}:{rowcol_to_a1(last_needed_row, len(new_rows[0]))}"
+        next_row = max(len(all_values) + 1, 5)
+        last_row = next_row + len(new_rows) - 1
+        if last_row > worksheet.row_count:
+            worksheet.add_rows(last_row - worksheet.row_count + 100)
+            
+        range_name = f"{rowcol_to_a1(next_row, 1)}:{rowcol_to_a1(last_row, len(new_rows[0]))}"
         worksheet.update(new_rows, range_name)
 
     return inserted_count, updated_count
@@ -689,41 +533,32 @@ def _upsert_ihk_sheet(
 # ─── IHK Orchestrator ─────────────────────────────────────────────────────────────
 
 def process_ihk_upload(dataframe, col_name: str, task_id: str = None) -> dict:
-    """
-    Upload IHK DataFrame ke 7 sheet Google Sheets sekaligus.
-    Return dict {'inserted': int, 'updated': int, 'details': list}.
-    """
+    """Upload IHK DataFrame ke 7 sheet Google Sheets sekaligus."""
+    from app.constants import IHK_SPREADSHEET_ID
     set_progress(task_id, 10, "Menyambungkan ke Google Sheets API...")
     spreadsheet = _get_spreadsheet(IHK_SPREADSHEET_ID)
 
-    total_inserted = 0
-    total_updated  = 0
+    total_inserted = total_updated = 0
     details = []
-
     num_sheets = len(SHEET_VALUE_MAP)
     set_progress(task_id, 20, f"Mempersiapkan {num_sheets} sheet...")
 
-    for idx, (excel_col, sheet_name) in enumerate(SHEET_VALUE_MAP.items(), 1):
-        msg = f"Memproses sheet '{sheet_name}' ({idx}/{num_sheets})..."
+    for idx, (ex_col, sh_name) in enumerate(SHEET_VALUE_MAP.items(), 1):
         pct = 20 + int(80 * (idx - 1) / num_sheets)
-        set_progress(task_id, pct, msg)
+        set_progress(task_id, pct, f"Memproses sheet '{sh_name}' ({idx}/{num_sheets})...")
         
-        worksheet = spreadsheet.worksheet(sheet_name)
-        # Tambahkan retry wrapper agar tidak gagal total jika kena limit
-        ins, upd = _retry_on_429(_upsert_ihk_sheet)(worksheet, dataframe, col_name, excel_col, _task_id=task_id)
+        worksheet = spreadsheet.worksheet(sh_name)
+        # Handle quota limits with retry
+        func = _retry_on_429(_upsert_ihk_sheet)
+        ins, upd = func(worksheet, dataframe, col_name, ex_col, _task_id=task_id)
+        
         total_inserted += ins
         total_updated  += upd
-        details.append({'sheet': sheet_name, 'inserted': ins, 'updated': upd})
-        
-        # Beri jeda antar sheet untuk meminimalkan resiko rate limit
-        time.sleep(1)
+        details.append({'sheet': sh_name, 'inserted': ins, 'updated': upd})
+        time.sleep(1) # Safety delay
 
     set_progress(task_id, 100, "Selesai!")
-    return {
-        'inserted': total_inserted,
-        'updated':  total_updated,
-        'details':  details,
-    }
+    return {'inserted': total_inserted, 'updated': total_updated, 'details': details}
 
 # ─── Ekspor Upload ────────────────────────────────────────────────────────────
 
@@ -791,15 +626,15 @@ def _upsert_recap_sheet(worksheet: gspread.Worksheet, months_recap_data: dict) -
             
         if yymm in lookup:
             row_idx = lookup[yymm]
-            batch_updates.append({'range': rowcol_to_a1(row_idx, col_map['Migas']), 'values': [[vals.get('MIGAS', 0)]]})
-            batch_updates.append({'range': rowcol_to_a1(row_idx, col_map['Non Migas']), 'values': [[vals.get('NON MIGAS', 0)]]})
-            batch_updates.append({'range': rowcol_to_a1(row_idx, col_map['Total']), 'values': [[vals.get('Total', 0)]]})
+            batch_updates.append({'range': rowcol_to_a1(row_idx, col_map['Migas']), 'values': [[float(vals.get('MIGAS', 0))]]})
+            batch_updates.append({'range': rowcol_to_a1(row_idx, col_map['Non Migas']), 'values': [[float(vals.get('NON MIGAS', 0))]]})
+            batch_updates.append({'range': rowcol_to_a1(row_idx, col_map['Total']), 'values': [[float(vals.get('Total', 0))]]})
         else:
             row_data = [''] * len(header_row)
             row_data[col_map['Periode']-1] = yymm_val
-            row_data[col_map['Migas']-1] = vals.get('MIGAS', 0)
-            row_data[col_map['Non Migas']-1] = vals.get('NON MIGAS', 0)
-            row_data[col_map['Total']-1] = vals.get('Total', 0)
+            row_data[col_map['Migas']-1] = float(vals.get('MIGAS', 0))
+            row_data[col_map['Non Migas']-1] = float(vals.get('NON MIGAS', 0))
+            row_data[col_map['Total']-1] = float(vals.get('Total', 0))
             new_rows.append(row_data)
             
     if batch_updates:
@@ -834,462 +669,242 @@ def _upsert_recap_sheet(worksheet: gspread.Worksheet, months_recap_data: dict) -
         
     return len(new_rows), len(months_recap_data) - len(new_rows)
 
-def _upsert_ekspor_sheet_bulk(worksheet: gspread.Worksheet, months_data: dict, key_col_name: str | list[str], sheet_name: str = None, upload_type: str = 'ekspor') -> tuple[int, int]:
-    """
-    Menambahkan atau mem-patch aggregated FOB sum ke Google Sheet Ekspor secara BULK.
-    months_data: { yymm_label: dataframe_group }
-    key_col_name: string (single key) atau list of strings (composite keys)
-    """
-    all_values = worksheet.get_all_values() # HANYA 1x READ CALL per sheet
-    header_row = all_values[0] if len(all_values) > 0 else []
-    
-    key_col_names = [key_col_name] if isinstance(key_col_name, str) else key_col_name
-    
-    prov_col_name = 'KodeProvTujuan' if upload_type == 'impor' else 'KodeProvAsal'
+def _migrate_exim_header(worksheet, header_row, sheet_name, upload_type):
+    """Migrate semantic keys in header to real DBF column names."""
+    all_dbf = {}
+    for mod in ('ekspor', 'impor'):
+        all_dbf.update(BRS_CONFIG[mod]['required_dbf_cols'])
+        
+    semantic_cols = [(i, h) for i, h in enumerate(header_row) if h in all_dbf]
+    if not semantic_cols: return header_row
 
-    if not header_row:
-        # Jika sheet kosong, inisialisasi header dasar
-        sample_yymm = list(months_data.keys())[0] if months_data else 'YYMM'
-        if sheet_name == 'Pelabuhan':
-            header_row = key_col_names + [prov_col_name, sample_yymm]
-        else:
-            header_row = key_col_names + [sample_yymm]
-        worksheet.append_row(header_row)
-        all_values = [header_row]
-        
-    # Ambil index untuk semua key columns
-    key_indices = []
-    for kn in key_col_names:
-        try:
-            key_indices.append(header_row.index(kn))
-        except ValueError:
-            # Jika kolom tidak ada di header, kita tambahkan manual ke header (lokal)
-            # dan nanti akan ter-update via batch_header_updates
-            key_indices.append(len(header_row))
-            header_row.append(kn)
-
-    # Khusus Pelabuhan: Cek/Sisipkan KodeProvAsal/KodeProvTujuan tepat di kanan key pertama
-    prov_col_idx = None
-    if sheet_name == 'Pelabuhan':
-        primary_key_idx = key_indices[0]
-        if prov_col_name in header_row:
-            prov_col_idx = header_row.index(prov_col_name)
-        else:
-            prov_col_idx = primary_key_idx + 1
-            # Sisipkan kolom via API (one-time operation)
-            _log.info(f"Menyisipkan kolom {prov_col_name} ke sheet {sheet_name}...")
-            worksheet.insert_cols([[prov_col_name]], prov_col_idx + 1)
-            # Refetch data karena semua kolom bergeser
-            all_values = worksheet.get_all_values()
-            header_row = all_values[0]
-            prov_col_idx = header_row.index(prov_col_name)
-            # Reset key_indices karena kolom bergeser
-            key_indices = [header_row.index(kn) for kn in key_col_names]
-
-    # Khusus NegaraBarang: Tidak ada lagi metadata BRSDESC, OIL, KEL_IMPOR
-    # Hanya pastikan HS key teridentifikasi jika masih dibutuhkan (biasanya tidak jika hanya 2 kolom keys)
+    updates = []
+    for idx, semantic in semantic_cols:
+        real = all_dbf[semantic]
+        _log.info(f'Migrasi header {semantic!r} -> {real!r} di sheet {sheet_name!r}')
+        header_row[idx] = real
+        updates.append({'range': rowcol_to_a1(1, idx + 1), 'values': [[real]]})
     
-    data_rows = all_values[1:]
+    if updates: worksheet.batch_update(updates)
     
-    def _get_lookup_key(row_data, idx_list):
-        return tuple(str(row_data[i]).strip() if i < len(row_data) else '' for i in idx_list)
+    # Remove accidental duplicates from failed previous runs
+    seen, to_delete = {}, []
+    for i, h in enumerate(header_row):
+        if h in seen: to_delete.append(i)
+        else: seen[h] = i
+        
+    for i in sorted(to_delete, reverse=True):
+        _log.info(f"Hapus kolom duplikat '{header_row[i]}' di {sheet_name}")
+        worksheet.delete_columns(i + 1)
+        
+    return worksheet.get_all_values()[0] if to_delete else header_row
 
-    lookup = {}
-    for i, row in enumerate(data_rows, start=2):
-        k = _get_lookup_key(row, key_indices)
-        if any(k): # Minimal ada satu bagian key yang tidak kosong
-            lookup[k] = i
-            
-    batch_updates = []
-    batch_header_updates = []
-    new_rows_map = {} # key_val -> [col1, col2, ...]
-    
-    inserted_count = 0
-    updated_count = 0
-    
-    # Proses setiap bulan
-    for yymm_label, df_group in months_data.items():
-        yymm_idx = _ensure_ekspor_yymm_column(worksheet, header_row, yymm_label, batch_header_updates)
-        # Re-calculate row_width
-        row_width = max(len(header_row), (max(key_indices) + 1) if key_indices else 0)
-        if prov_col_idx is not None:
-            row_width = max(row_width, prov_col_idx + 1)
-        
-        
-        for _, row in df_group.iterrows():
-            # Build current key as tuple
-            curr_key_parts = []
-            for kn in key_col_names:
-                curr_key_parts.append(str(row.get(kn, '')).strip())
-            curr_key = tuple(curr_key_parts)
-            
-            val_fob = float(row['FOB'])
-            
-            if curr_key in lookup:
-                row_idx = lookup[curr_key]
-                batch_updates.append({
-                    'range': rowcol_to_a1(row_idx, yymm_idx),
-                    'values': [[val_fob]]
-                })
-                # Opsional: Pastikan KodeProvAsal/Tujuan terisi jika kosong (khusus Pelabuhan)
-                if prov_col_idx is not None:
-                    curr_row_idx = row_idx - 1
-                    curr_row = all_values[curr_row_idx] if curr_row_idx < len(all_values) else []
-                    if prov_col_idx >= len(curr_row) or not str(curr_row[prov_col_idx]).strip():
-                        batch_updates.append({
-                            'range': rowcol_to_a1(row_idx, prov_col_idx + 1),
-                            # Ambil 2 digit dari key pertama (PODAL5 / K_PELB)
-                            'values': [[curr_key[0][:2]]]
-                        })
-                
-                updated_count += 1
-            else:
-                # Handle baris baru
-                if curr_key not in new_rows_map:
-                    row_data = [''] * row_width
-                    # Set all key columns
-                    for i, idx in enumerate(key_indices):
-                        if idx < row_width:
-                            row_data[idx] = curr_key[i]
-                    
-                    if prov_col_idx is not None and prov_col_idx < row_width:
-                        row_data[prov_col_idx] = curr_key[0][:2]
-                        
-                    new_rows_map[curr_key] = row_data
-                    inserted_count += 1
-                
-                # Update kolom bulan di baris baru
-                if yymm_idx > len(new_rows_map[curr_key]):
-                    new_rows_map[curr_key].extend([''] * (yymm_idx - len(new_rows_map[curr_key])))
-                new_rows_map[curr_key][yymm_idx - 1] = val_fob
-
-    # Eksekusi Updates
-    if batch_header_updates:
-        worksheet.batch_update(batch_header_updates)
-        
-    if batch_updates:
-        # Pecah batch updates jika terlalu besar untuk menghindari error lain
-        # (meskipun biasanya limitnya cukup besar untuk cell updates)
-        worksheet.batch_update(batch_updates)
-        
-    if new_rows_map:
-        new_rows = list(new_rows_map.values())
-        # Pastikan semua baris memiliki panjang yang sama (padding) agar tidak error saat batch update
-        max_cols_in_new = max(len(r) for r in new_rows)
-        for i in range(len(new_rows)):
-            diff = max_cols_in_new - len(new_rows[i])
-            if diff > 0:
-                new_rows[i].extend([''] * diff)
-
-        next_empty_row = max(len(all_values) + 1, 2)
-        last_needed_row = next_empty_row + len(new_rows) - 1
-        
-        if last_needed_row > worksheet.row_count:
-            worksheet.add_rows(last_needed_row - worksheet.row_count + 50)
-            
-        range_name = f"{rowcol_to_a1(next_empty_row, 1)}:{rowcol_to_a1(last_needed_row, max_cols_in_new)}"
-        worksheet.update(new_rows, range_name)
-        
-    # ── SORTING AKHIR (Rows & Columns) ──────────────────────────────────────
+def _sort_exim_sheet(worksheet, key_indices, header_row):
+    """Sort rows by keys and columns by YYMM labels."""
     try:
-        # 1. Sort Rows by Keys (Composite)
-        final_row_count = worksheet.row_count
-        if final_row_count > 1:
-            sort_specs = [{"dimensionIndex": idx, "sortOrder": "ASCENDING"} for idx in key_indices]
-            body = {
+        # 1. Row sorting
+        if worksheet.row_count > 1:
+            worksheet.spreadsheet.batch_update({
                 "requests": [{
                     "sortRange": {
-                        "range": {
-                            "sheetId": worksheet.id,
-                            "startRowIndex": 1,
-                            "endRowIndex": final_row_count,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": len(header_row)
-                        },
-                        "sortSpecs": sort_specs
+                        "range": {"sheetId": worksheet.id, "startRowIndex": 1, "endRowIndex": worksheet.row_count, "startColumnIndex": 0, "endColumnIndex": len(header_row)},
+                        "sortSpecs": [{"dimensionIndex": idx, "sortOrder": "ASCENDING"} for idx in key_indices]
                     }
                 }]
-            }
-            worksheet.spreadsheet.batch_update(body)
-
-        # 2. Horizontal Sorting (Columns)
+            })
+        
+        # 2. Column sorting (YYMM horizontal)
         curr_header = worksheet.get_all_values()[0]
-        periods = []
-        for i, val in enumerate(curr_header):
-            v = str(val).strip()
-            if v.isdigit() and len(v) == 4:
-                periods.append((v, i))
-        
-        if periods:
-            # Urutkan periods berdasarkan label YYMM secara ascending
-            sorted_periods = sorted(periods, key=lambda x: x[0])
-            
-            # Cek apakah sudah terurut
-            current_indices = [p[1] for p in periods]
-            # Kita tidak bisa sekadar bandingkan indices karena positions bisa geser
-            # Kita cek apakah labels di curr_header sudah terurut di posisinya
-            
-            # Simulasi untuk batch move
-            move_requests = []
-            header_sim = list(curr_header)
-            # Tentukan start offset (posisi kolom pertama yang berisi periode)
-            # Namun agar lebih stabil, kita ambil index terkecil dari kolom periode yang ada
-            start_offset = min(p[1] for p in periods)
-            
-            for target_pos, (label, _) in enumerate(sorted_periods):
-                final_target_idx = start_offset + target_pos
-                try:
-                    actual_idx = header_sim.index(label)
-                except ValueError:
-                    continue
-                
-                if actual_idx != final_target_idx:
-                    move_requests.append({
-                        "moveDimension": {
-                            "source": {
-                                "sheetId": worksheet.id,
-                                "dimension": "COLUMNS",
-                                "startIndex": actual_idx,
-                                "endIndex": actual_idx + 1
-                            },
-                            "destinationIndex": final_target_idx if final_target_idx < actual_idx else final_target_idx + 1
-                        }
-                    })
-                    # Update simulasi
-                    col = header_sim.pop(actual_idx)
-                    header_sim.insert(final_target_idx, col)
-            
-            if move_requests:
-                _log.info(f"Mengurutkan {len(move_requests)} kolom secara horizontal di {sheet_name}...")
-                worksheet.spreadsheet.batch_update({"requests": move_requests})
+        periods = sorted([(v, i) for i, v in enumerate(curr_header) if str(v).isdigit() and len(str(v)) == 4], key=lambda x: x[0])
+        if not periods: return
 
-    except Exception as e:
-        _log.error(f"Gagal sorting akhir {sheet_name}: {e}")
+        start_offset = min(p[1] for p in periods)
+        moves = []
+        sim_header = list(curr_header)
+        for target_pos, (label, _) in enumerate(periods):
+            target_idx = start_offset + target_pos
+            actual_idx = sim_header.index(label)
+            if actual_idx != target_idx:
+                moves.append({
+                    "moveDimension": {
+                        "source": {"sheetId": worksheet.id, "dimension": "COLUMNS", "startIndex": actual_idx, "endIndex": actual_idx + 1},
+                        "destinationIndex": target_idx if target_idx < actual_idx else target_idx + 1
+                    }
+                })
+                sim_header.insert(target_idx, sim_header.pop(actual_idx))
         
-    return inserted_count, updated_count
+        if moves: worksheet.spreadsheet.batch_update({"requests": moves})
+    except Exception as e:
+        _log.error(f"Gagal sorting: {e}")
+
+def _upsert_exim_sheet_bulk(worksheet: gspread.Worksheet, months_data: dict, key_col_name: str | list[str], val_col: str, sheet_name: str = None, upload_type: str = 'ekspor') -> tuple[int, int]:
+    """Bulk upsert aggregated data to Export/Import sheets."""
+    all_values = worksheet.get_all_values()
+    header_row = all_values[0] if all_values else []
+    key_names = [key_col_name] if isinstance(key_col_name, str) else key_col_name
+    prov_col = 'KodeProvTujuan' if upload_type == 'impor' else 'KodeProvAsal'
+
+    # 1. Initialize/Migrate Header
+    if not header_row:
+        sample = list(months_data.keys())[0] if months_data else 'YYMM'
+        header_row = key_names + ([prov_col] if sheet_name == 'Pelabuhan' else []) + [sample]
+        worksheet.append_row(header_row)
+    
+    header_row = _migrate_exim_header(worksheet, header_row, sheet_name, upload_type)
+    all_values = worksheet.get_all_values()
+    
+    # 2. Setup indices
+    prov_idx = None
+    if sheet_name == 'Pelabuhan':
+        if prov_col not in header_row:
+            primary_idx = header_row.index(key_names[0])
+            _log.info(f"Menyisipkan kolom {prov_col}...")
+            worksheet.insert_cols([[prov_col]], primary_idx + 2)
+            all_values = worksheet.get_all_values()
+            header_row = all_values[0]
+        prov_idx = header_row.index(prov_col)
+    
+    key_indices = [header_row.index(k) for k in key_names]
+
+    # 3. Process Data
+    lookup = {tuple(str(row[i]).strip() for i in key_indices): i + 1 for i, row in enumerate(all_values[1:]) if any(row)}
+    batch_updates, header_updates, new_rows_map = [], [], {}
+    inserted = updated = 0
+
+    for yymm, df_group in months_data.items():
+        yymm_idx = _ensure_ekspor_yymm_column(worksheet, header_row, yymm, header_updates)
+        width = max(len(header_row), max(key_indices) + 1, (prov_idx + 1) if prov_idx is not None else 0)
+
+        for _, row in df_group.iterrows():
+            key = tuple(str(row.get(k, '')).strip() for k in key_names)
+            val = float(row[val_col])
+
+            if key in lookup:
+                row_idx = lookup[key]
+                batch_updates.append({'range': rowcol_to_a1(row_idx, yymm_idx), 'values': [[val]]})
+                if prov_idx is not None:
+                    curr_row = all_values[row_idx-1] if row_idx-1 < len(all_values) else []
+                    if prov_idx >= len(curr_row) or not str(curr_row[prov_idx]).strip():
+                        batch_updates.append({'range': rowcol_to_a1(row_idx, prov_idx + 1), 'values': [[key[0][:2]]]})
+                updated += 1
+            else:
+                if key not in new_rows_map:
+                    rd = [''] * width
+                    for i, idx in enumerate(key_indices): rd[idx] = key[i]
+                    if prov_idx is not None: rd[prov_idx] = key[0][:2]
+                    new_rows_map[key] = rd
+                    inserted += 1
+                
+                if yymm_idx > len(new_rows_map[key]):
+                    new_rows_map[key].extend([''] * (yymm_idx - len(new_rows_map[key])))
+                new_rows_map[key][yymm_idx - 1] = val
+
+    # 4. Execute updates
+    if header_updates: worksheet.batch_update(header_updates)
+    if batch_updates: worksheet.batch_update(batch_updates)
+    if new_rows_map:
+        new_rows = list(new_rows_map.values())
+        max_c = max(len(r) for r in new_rows)
+        for r in new_rows: r.extend([''] * (max_c - len(r)))
+        
+        start_r = len(all_values) + 1
+        last_r = start_r + len(new_rows) - 1
+        if last_r > worksheet.row_count: worksheet.add_rows(last_r - worksheet.row_count + 50)
+        worksheet.update(new_rows, f"{rowcol_to_a1(start_r, 1)}:{rowcol_to_a1(last_r, max_c)}")
+
+    _sort_exim_sheet(worksheet, key_indices, header_row)
+    return inserted, updated
+
+def _process_exim_orchestrator(dataframe, upload_type: str, task_id: str = None) -> dict:
+    """Internal shared orchestrator for Ekspor and Impor uploads."""
+    import pandas as pd
+    from app.constants import EKSPOR_IMPOR_SPREADSHEET_ID, IMPOR_SPREADSHEET_ID
+    
+    config = BRS_CONFIG[upload_type]
+    ss_id = EKSPOR_IMPOR_SPREADSHEET_ID if upload_type == 'ekspor' else IMPOR_SPREADSHEET_ID
+    
+    set_progress(task_id, 10, "Menyambungkan ke Google Sheets API...")
+    spreadsheet = _get_spreadsheet(ss_id)
+    
+    _dbf = config['required_dbf_cols']
+    val_col = _dbf['KeyNilai']
+    dataframe['KeyNilai'] = pd.to_numeric(dataframe['KeyNilai'], errors='coerce').fillna(0)
+    
+    # 1. Prepare month groups
+    set_progress(task_id, 20, "Mempersiapkan pengelompokan baris per bulan...")
+    months_payload = {}
+    for (year, month), group in dataframe.groupby(['KeyTahun', 'KeyBulan']):
+        try:
+            label = str(int(float(year)))[-2:] + str(int(float(month))).zfill(2)
+            months_payload[label] = group
+        except: continue
+
+    if not months_payload:
+        return {'inserted': 0, 'updated': 0, 'details': [{'error': 'No valid month/year data found'}]}
+
+    total_inserted = total_updated = 0
+    details = []
+    targets = list(config['targets'].items())
+    
+    # 2. Process data sheets
+    for idx, (sh_name, group_key) in enumerate(targets, 1):
+        set_progress(task_id, 30 + (idx-1)*20, f"Memproses sheet '{sh_name}'...")
+        
+        keys_list = [group_key] if isinstance(group_key, str) else group_key
+        rename_map = {k: _dbf[k] for k in keys_list}
+        rename_map['KeyNilai'] = val_col
+        
+        prepared_months = {}
+        for yymm, group in months_payload.items():
+            summed = group.groupby(keys_list)['KeyNilai'].sum().reset_index()
+            prepared_months[yymm] = summed.rename(columns=rename_map)
+        
+        real_key_col = [_dbf[k] for k in keys_list]
+        if len(real_key_col) == 1: real_key_col = real_key_col[0]
+        
+        worksheet = spreadsheet.worksheet(sh_name)
+        ins, upd = _retry_on_429(_upsert_exim_sheet_bulk)(worksheet, prepared_months, real_key_col, val_col, sh_name, upload_type=upload_type)
+        total_inserted += ins
+        total_updated += upd
+        details.append({'sheet': sh_name, 'inserted': ins, 'updated': upd})
+        time.sleep(1)
+
+    # 3. Process RECAP sheet
+    set_progress(task_id, 90, "Memproses sheet RECAP...")
+    try:
+        hs_map = _get_master_hs_data(spreadsheet)
+        df_recap = dataframe.copy()
+        df_recap['OIL'] = df_recap['KeyKodeHS'].map(lambda x: hs_map.get(str(x).strip(), 'NON MIGAS'))
+        df_recap['OIL'] = df_recap['OIL'].apply(lambda x: 'MIGAS' if 'MIGAS' in str(x).upper() and 'NON' not in str(x).upper() else 'NON MIGAS')
+        
+        recap_payload = {}
+        for (year, month), group in df_recap.groupby(['KeyTahun', 'KeyBulan']):
+            try:
+                yymm = str(int(float(year)))[-2:] + str(int(float(month))).zfill(2)
+                oil_sums = group.groupby('OIL')['KeyNilai'].sum().to_dict()
+                recap_payload[yymm] = {
+                    'MIGAS': oil_sums.get('MIGAS', 0),
+                    'NON MIGAS': oil_sums.get('NON MIGAS', 0),
+                    'Total': group['KeyNilai'].sum()
+                }
+            except: continue
+            
+        if recap_payload:
+            ins_r, upd_r = _retry_on_429(_upsert_recap_sheet)(spreadsheet.worksheet('RECAP'), recap_payload)
+            total_inserted += ins_r
+            total_updated += upd_r
+            details.append({'sheet': 'RECAP', 'inserted': ins_r, 'updated': upd_r})
+    except Exception as e:
+        _log.error(f"Gagal update RECAP: {e}")
+        details.append({'sheet': 'RECAP', 'error': str(e)})
+
+    set_progress(task_id, 100, "Selesai!")
+    return {'inserted': total_inserted, 'updated': total_updated, 'details': details}
 
 def process_ekspor_upload(dataframe, task_id: str = None) -> dict:
-    """Menerima dataframe ekspor, mengelompokkan jumlah FOB secara bulk, dan menguploadnya."""
-    import pandas as pd
-    
-    set_progress(task_id, 10, "Menyambungkan ke Google Sheets API...")
-    spreadsheet = _get_spreadsheet(EKSPOR_IMPOR_SPREADSHEET_ID)
-    
-    dataframe['FOB'] = pd.to_numeric(dataframe['FOB'], errors='coerce').fillna(0)
-    
-    if 'YEAR' not in dataframe.columns or 'MTH' not in dataframe.columns:
-        raise ValueError("Kolom 'YEAR' atau 'MTH' tidak ditemukan di data.")
-        
-    for req_col in ['KODE_HS', 'PODAL5', 'NEWCTRYCOD']:
-        if req_col not in dataframe.columns:
-            raise ValueError(f"Kolom '{req_col}' tidak ditemukan di data.")
-    
-    total_inserted = 0
-    total_updated = 0
-    details = []
-    
-    # 1.5 Fetch HS Master map
-    set_progress(task_id, 20, "Mengambil data MASTER referensi...")
-    hs_master_map = _get_master_hs_data(spreadsheet)
-    
-    # 1. Pre-group data by month
-    set_progress(task_id, 30, "Mempersiapkan pengelompokan baris per bulan...")
-    months_payload = {}
-    for (year, month), group in dataframe.groupby(['YEAR', 'MTH']):
-        if not str(year).strip() or not str(month).strip():
-            continue
-        try:
-            year_str = str(int(float(year)))[-2:]
-            month_str = str(int(float(month))).zfill(2)
-            yymm_label = year_str + month_str
-            months_payload[yymm_label] = group
-        except (ValueError, TypeError):
-            continue
-
-    if not months_payload:
-        return {'inserted': 0, 'updated': 0, 'details': [{'error': 'No valid month/year data found'}]}
-
-    # 2. Process per sheet (Total only 2 sheets for Ekspor)
-    targets = [
-        ('Pelabuhan', 'PODAL5'),
-        ('NegaraBarang', ['NEWCTRYCOD', 'KODE_HS'])
-    ]
-    
-    for idx, (target_sheet_name, group_key_col) in enumerate(targets, 1):
-        def _execute_bulk():
-            # Agregasi data untuk setiap bulan khusus untuk sheet ini
-            set_progress(task_id, 40 + (idx-1)*20, f"Agregasi data untuk sheet '{target_sheet_name}'...")
-            prepared_months = {}
-            for yymm, group in months_payload.items():
-                summed = group.groupby(group_key_col)['FOB'].sum().reset_index()
-                prepared_months[yymm] = summed
-            
-            worksheet = spreadsheet.worksheet(target_sheet_name)
-            return _upsert_ekspor_sheet_bulk(worksheet, prepared_months, group_key_col, target_sheet_name, upload_type='ekspor')
-            
-        ins, upd = _retry_on_429(_execute_bulk)()
-        total_inserted += ins
-        total_updated += upd
-        details.append({'sheet': target_sheet_name, 'inserted': ins, 'updated': upd})
-        
-        # Jeda antar sheet
-        time.sleep(2)
-
-    # 3. Process RECAP sheet
-    def _execute_recap():
-        set_progress(task_id, 90, "Agregasi data untuk sheet 'RECAP'...")
-        # Map OIL and aggregate
-        df_recap = dataframe.copy()
-        df_recap['OIL'] = df_recap['KODE_HS'].map(lambda x: hs_master_map.get(str(x).strip(), 'NON MIGAS'))
-        # Normalize OIL names to MIGAS or NON MIGAS
-        df_recap['OIL'] = df_recap['OIL'].apply(lambda x: 'MIGAS' if 'MIGAS' in str(x).upper() and 'NON' not in str(x).upper() else 'NON MIGAS')
-        
-        recap_payload = {}
-        for (year, month), group in df_recap.groupby(['YEAR', 'MTH']):
-            try:
-                yymm = str(int(float(year)))[-2:] + str(int(float(month))).zfill(2)
-                oil_sums = group.groupby('OIL')['FOB'].sum().to_dict()
-                total = group['FOB'].sum()
-                recap_payload[yymm] = {
-                    'MIGAS': oil_sums.get('MIGAS', 0),
-                    'NON MIGAS': oil_sums.get('NON MIGAS', 0),
-                    'Total': total
-                }
-            except:
-                continue
-                
-        if recap_payload:
-            worksheet = spreadsheet.worksheet('RECAP')
-            ins, upd = _upsert_recap_sheet(worksheet, recap_payload)
-            return ins, upd
-        return 0, 0
-
-    try:
-        ins_r, upd_r = _retry_on_429(_execute_recap)()
-        details.append({'sheet': 'RECAP', 'inserted': ins_r, 'updated': upd_r})
-        total_inserted += ins_r
-        total_updated += upd_r
-    except Exception as e:
-        _log.error(f"Gagal update RECAP: {e}")
-        details.append({'sheet': 'RECAP', 'error': str(e)})
-
-    set_progress(task_id, 100, "Selesai!")
-    return {
-        'inserted': total_inserted,
-        'updated': total_updated,
-        'details': details
-    }
-
-
-# ─── Impor Upload (Similar to Ekspor) ─────────────────────────────────────────
+    """Menerima dataframe ekspor dan menguploadnya."""
+    return _process_exim_orchestrator(dataframe, 'ekspor', task_id)
 
 def process_impor_upload(dataframe, task_id: str = None) -> dict:
-    """Menerima dataframe impor, mengelompokkan jumlah N1225/NILAI secara bulk, dan menguploadnya."""
-    import pandas as pd
-    
-    set_progress(task_id, 10, "Menyambungkan ke Google Sheets API...")
-    spreadsheet = _get_spreadsheet(IMPOR_SPREADSHEET_ID)
-    
-    dataframe['N1225'] = pd.to_numeric(dataframe['N1225'], errors='coerce').fillna(0)
-    
-    if 'YEAR' not in dataframe.columns or 'MTH' not in dataframe.columns:
-        raise ValueError("Kolom 'YEAR' atau 'MTH' tidak ditemukan di data.")
-        
-    for req_col in ['HS', 'K_NEGARA']:
-        if req_col not in dataframe.columns:
-            raise ValueError(f"Kolom '{req_col}' tidak ditemukan di data.")
-    
-    total_inserted = 0
-    total_updated = 0
-    details = []
-    
-    # 1.5 Fetch HS Master map
-    set_progress(task_id, 20, "Mengambil data MASTER referensi...")
-    hs_master_map = _get_master_hs_data(spreadsheet)
-    
-    # 1. Pre-group data by month
-    set_progress(task_id, 30, "Mempersiapkan pengelompokan baris per bulan...")
-    months_payload = {}
-    for (year, month), group in dataframe.groupby(['YEAR', 'MTH']):
-        if not str(year).strip() or not str(month).strip():
-            continue
-        try:
-            year_str = str(int(float(year)))[-2:]
-            month_str = str(int(float(month))).zfill(2)
-            yymm_label = year_str + month_str
-            months_payload[yymm_label] = group
-        except (ValueError, TypeError):
-            continue
-
-    if not months_payload:
-        return {'inserted': 0, 'updated': 0, 'details': [{'error': 'No valid month/year data found'}]}
-
-    # 2. Process per sheet
-    targets = [
-        ('NegaraBarang', ['K_NEGARA', 'HS'])
-    ]
-    
-    for idx, (target_sheet_name, group_key_col) in enumerate(targets, 1):
-        def _execute_bulk():
-            set_progress(task_id, 40 + (idx-1)*20, f"Agregasi data untuk sheet '{target_sheet_name}'...")
-            prepared_months = {}
-            for yymm, group in months_payload.items():
-                summed = group.groupby(group_key_col)['N1225'].sum().reset_index()
-                # _upsert_ekspor_sheet_bulk expects 'FOB' col
-                summed = summed.rename(columns={'N1225': 'FOB'})
-                prepared_months[yymm] = summed
-            
-            worksheet = spreadsheet.worksheet(target_sheet_name)
-            return _upsert_ekspor_sheet_bulk(worksheet, prepared_months, group_key_col, target_sheet_name, upload_type='impor')
-            
-        ins, upd = _retry_on_429(_execute_bulk)()
-        total_inserted += ins
-        total_updated += upd
-        details.append({'sheet': target_sheet_name, 'inserted': ins, 'updated': upd})
-        
-        time.sleep(2)
-
-    # 3. Process RECAP sheet
-    def _execute_recap():
-        set_progress(task_id, 90, "Agregasi data untuk sheet 'RECAP'...")
-        # Map OIL and aggregate
-        df_recap = dataframe.copy()
-        df_recap['OIL'] = df_recap['HS'].map(lambda x: hs_master_map.get(str(x).strip(), 'NON MIGAS'))
-        # Normalize OIL names to MIGAS or NON MIGAS
-        df_recap['OIL'] = df_recap['OIL'].apply(lambda x: 'MIGAS' if 'MIGAS' in str(x).upper() and 'NON' not in str(x).upper() else 'NON MIGAS')
-        
-        recap_payload = {}
-        for (year, month), group in df_recap.groupby(['YEAR', 'MTH']):
-            try:
-                yymm = str(int(float(year)))[-2:] + str(int(float(month))).zfill(2)
-                oil_sums = group.groupby('OIL')['N1225'].sum().to_dict()
-                total = group['N1225'].sum()
-                recap_payload[yymm] = {
-                    'MIGAS': oil_sums.get('MIGAS', 0),
-                    'NON MIGAS': oil_sums.get('NON MIGAS', 0),
-                    'Total': total
-                }
-            except:
-                continue
-                
-        if recap_payload:
-            worksheet = spreadsheet.worksheet('RECAP')
-            ins, upd = _upsert_recap_sheet(worksheet, recap_payload)
-            return ins, upd
-        return 0, 0
-
-    try:
-        ins_r, upd_r = _retry_on_429(_execute_recap)()
-        details.append({'sheet': 'RECAP', 'inserted': ins_r, 'updated': upd_r})
-        total_inserted += ins_r
-        total_updated += upd_r
-    except Exception as e:
-        _log.error(f"Gagal update RECAP: {e}")
-        details.append({'sheet': 'RECAP', 'error': str(e)})
-
-    set_progress(task_id, 100, "Selesai!")
-    return {
-        'inserted': total_inserted,
-        'updated': total_updated,
-        'details': details
-    }
+    """Menerima dataframe impor dan menguploadnya."""
+    return _process_exim_orchestrator(dataframe, 'impor', task_id)

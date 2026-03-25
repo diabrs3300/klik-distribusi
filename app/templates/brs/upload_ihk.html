@@ -159,7 +159,7 @@
                                 File Excel (.xlsx) <span class="text-danger">*</span>
                             </label>
                             <input type="file" id="file" name="file" class="form-control" accept=".xlsx" required />
-                            <div class="form-text">Hanya file <code>.xlsx</code>. Header Excel di baris ke-3.</div>
+                            <div class="form-text">Hanya file <code>.xlsx</code>. Header Excel di baris ke-3.<br><span class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle"></i> Maksimal ukuran file: 4.5 MB</span></div>
                         </div>
 
                         <!-- Submit & Progress -->
@@ -264,6 +264,16 @@
         const progressText = document.getElementById('progressText');
         const progressPercent = document.getElementById('progressPercent');
 
+        
+        const fileInput = form.querySelector('input[type="file"]');
+        if (fileInput && fileInput.files.length > 0) {
+            const fileSizeMB = fileInput.files[0].size / 1024 / 1024;
+            if (fileSizeMB > 4.5) {
+                alert('🔴 UKURAN FILE TERLALU BESAR!\n\nMaksimal ukuran yang diizinkan server adalah 4.5 MB.\nUkuran file Anda: ' + fileSizeMB.toFixed(2) + ' MB.\n\nSilakan hapus baris/kolom kosong atau sheet yang tidak perlu sebelum mengupload ulang.');
+                return;
+            }
+        }
+        
         // Disable button & show spinner
         btn.disabled = true;
         text.classList.add('d-none');

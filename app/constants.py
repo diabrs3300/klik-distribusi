@@ -23,3 +23,8 @@ USERS_SHEET_NAME = 'akun'
 
 # ─── TTL Cache (berlaku untuk keduanya) ───────────────────────────────────────
 DOCS_CACHE_TTL = 300  # detik (default: 5 menit)
+
+# ─── Spreadsheet IDs Data BRS ──────────────────────────────────────────────────
+IHK_SPREADSHEET_ID = '1iB0DMQw7kjVzl5PgrVsb1wtQIlRF3QL-pZHYmQ0JySQ'
+EKSPOR_IMPOR_SPREADSHEET_ID = '15FRr5c0HuhED1DpyMwfy6xXCxDXDXGMSiMYrk3a0ui0'
+IMPOR_SPREADSHEET_ID = '1a3h0w4zE_kdvszM15H_UPWQ76QykSADIGOY-zXyTqzc'

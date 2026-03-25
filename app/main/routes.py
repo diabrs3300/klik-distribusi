@@ -9,6 +9,11 @@ from app.services.sheets import get_docs, get_klik_links, clear_docs_cache
 import app.services.sheets as _sheets
 import io
 
+from app.main.brs_cols import BRS_CONFIG
+
+@main.context_processor
+def inject_brs_config():
+    return dict(brs_config=BRS_CONFIG)
 
 def _require_akses(flag_key):
     """Decorator: tolak akses (403) jika user tidak punya flag_key."""
@@ -39,7 +44,7 @@ def index():
     return render_template('index.html', title='Klik Distribusi', klik_groups=klik_groups)
 
 
-@main.route('/klik-refresh')
+@main.route('/dia-brs/klik-refresh')
 def klik_refresh():
     """Hapus cache Klik Distribusi lalu redirect ke halaman utama."""
     from app.services.sheets import _klik_cache, _klik_cache_ts
@@ -50,7 +55,7 @@ def klik_refresh():
     return redirect(url_for('main.index'))
 
 
-@main.route('/docs-refresh')
+@main.route('/dia-brs/docs-refresh')
 @login_required
 def docs_refresh():
     """Hapus cache semua BRS docs lalu redirect kembali ke halaman asal."""
@@ -64,7 +69,7 @@ def docs_refresh():
     return redirect(url_for('main.dia_brs'))
 
 
-@main.route('/dashboard')
+@main.route('/dia-brs/dashboard')
 @login_required
 def dashboard():
     return redirect(url_for('main.dia_brs'))
@@ -79,7 +84,7 @@ def dia_brs():
 from app.services.sheets import get_docs
 
 
-@main.route('/brs/ihk')
+@main.route('/dia-brs/ihk')
 @login_required
 @_require_akses('akses_ihk')
 def brs_ihk():
@@ -87,7 +92,7 @@ def brs_ihk():
     return render_template('brs/ihk.html', title='BRS IHK-Inflasi', docs=docs)
 
 
-@main.route('/brs/ntp')
+@main.route('/dia-brs/ntp')
 @login_required
 @_require_akses('akses_ntp')
 def brs_ntp():
@@ -95,7 +100,7 @@ def brs_ntp():
     return render_template('brs/ntp.html', title='BRS NTP', docs=docs)
 
 
-@main.route('/brs/transportasi')
+@main.route('/dia-brs/transportasi')
 @login_required
 @_require_akses('akses_transportasi')
 def brs_transportasi():
@@ -103,7 +108,7 @@ def brs_transportasi():
     return render_template('brs/transportasi.html', title='BRS Transportasi', docs=docs)
 
 
-@main.route('/brs/ekspor')
+@main.route('/dia-brs/ekspor-impor')
 @login_required
 @_require_akses('akses_ekspor_impor')
 def brs_ekspor():
@@ -111,7 +116,7 @@ def brs_ekspor():
     return render_template('brs/ekspor.html', title='BRS Ekspor Impor', docs=docs)
 
 
-@main.route('/brs/pariwisata')
+@main.route('/dia-brs/pariwisata')
 @login_required
 @_require_akses('akses_pariwisata')
 def brs_pariwisata():
@@ -123,28 +128,21 @@ def brs_pariwisata():
 
 # ─── Upload IHK ───────────────────────────────────────────────────────────────
 
-REQUIRED_EXCEL_COLS = [
-    'Tahun', 'Bulan', 'Kode Kota', 'Kode Komoditas',
-    'IHK', 'NK',
-    'Inflasi MtM', 'Inflasi YtD', 'Inflasi YoY',
-    'Andil MtM', 'Andil YtD', 'Andil YoY',
-]
-
 # ─── Progress Tracker API ─────────────────────────────────────────────────────
 
-@main.route('/upload-progress/<task_id>')
+@main.route('/dia-brs/upload-progress/<task_id>')
 @login_required
 def upload_progress(task_id):
     from app.services.sheets import get_progress
     from flask import jsonify
     return jsonify(get_progress(task_id))
 
-@main.route('/upload-ihk', methods=['GET', 'POST'])
+@main.route('/dia-brs/ihk/upload', methods=['GET', 'POST'])
 @login_required
 @_require_akses('akses_ihk')
 def upload_ihk():
     if request.method == 'GET':
-        return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     # ── Ambil input form ──────────────────────────────────────────────────────
     bulan  = request.form.get('bulan', '').strip()
@@ -168,7 +166,7 @@ def upload_ihk():
     if errors:
         for e in errors:
             flash(e, 'danger')
-        return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     # ── Baca Excel ────────────────────────────────────────────────────────────
     try:
@@ -178,17 +176,17 @@ def upload_ihk():
         df = pd.read_excel(file, header=2, dtype=str).fillna('')
     except Exception as e:
         flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     # ── Validasi kolom Excel ──────────────────────────────────────────────────
-    missing_cols = [c for c in REQUIRED_EXCEL_COLS if c not in df.columns]
+    missing_cols = [c for c in BRS_CONFIG['ihk']['required_cols'] if c not in df.columns]
     if missing_cols:
         flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
-        return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('upload_ihk.html', title='Upload Excel IHK-Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK-Inflasi')
 
     # ── Validasi & Filter Bulan/Tahun ─────────────────────────────────────────
     # Normalisasi: int(bulan) agar '01' == '1' (kedua sisi)
@@ -215,7 +213,7 @@ def upload_ihk():
             f'Pastikan kolom Bulan dan Tahun di Excel sesuai.',
             'danger'
         )
-        return render_template('upload_ihk.html', title='Upload Excel IHK-Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK-Inflasi')
 
     if matched_cnt < total_rows:
         filter_info = (
@@ -241,10 +239,10 @@ def upload_ihk():
             'Letakkan service account key di root project.',
             'danger'
         )
-        return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
     except Exception as e:
         flash(f'Gagal meng-upload ke Google Sheets: {e}', 'danger')
-        return render_template('upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     # ── Sukses — langsung render dengan stats (tanpa flash duplikat) ──────────
     if task_id:
@@ -261,7 +259,7 @@ def upload_ihk():
 
 # ── Download Template Excel ────────────────────────────────────────────────────
 
-@main.route('/download-template-ihk')
+@main.route('/dia-brs/ihk/template')
 @login_required
 @_require_akses('akses_ihk')
 def download_template_ihk():
@@ -274,12 +272,7 @@ def download_template_ihk():
     ws = wb.active
     ws.title = 'Template IHK-Inflasi'
 
-    COLS = [
-        'Tahun', 'Bulan', 'Kode Kota', 'Nama Kota', 'Kode Komoditas',
-        'Nama Komoditas', 'Flag', 'NK', 'IHK',
-        'Inflasi MtM', 'Inflasi YtD', 'Inflasi YoY',
-        'Andil MtM', 'Andil YtD', 'Andil YoY',
-    ]
+    COLS = BRS_CONFIG['ihk']['required_cols']
 
     # ── Baris 1: Judul ──────────────────────────────────────────────────────
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLS))
@@ -315,22 +308,19 @@ def download_template_ihk():
     ws.row_dimensions[3].height = 30
 
     # ── Baris 4: Contoh data ──────────────────────────────────────────────
-    sample = [
-        2026, 8, 3300, 'PROV JAWA TENGAH', '0',
-        'UMUM', 0, 105.12, 105.12,
-        0.25, 1.30, 2.10,
-        0.05, 0.20, 0.35,
-    ]
-    sample_fill   = PatternFill('solid', fgColor='E8F5E9')
-    sample_font   = Font(color='555555', italic=True, size=10)
+    sample = BRS_CONFIG['ihk']['template']['sample']
+    # sample_fill   = PatternFill('solid', fgColor='E8F5E9')
+    # sample_font   = Font(color='555555', italic=True, size=10)
     for col_idx, val in enumerate(sample, start=1):
         cell           = ws.cell(row=4, column=col_idx, value=val)
-        cell.fill      = sample_fill
-        cell.font      = sample_font
+        # cell.fill      = sample_fill
+        # cell.font      = sample_font
         cell.alignment = Alignment(horizontal='center', vertical='center')
+        if isinstance(val, float):
+            cell.number_format = '#,##0.00'
 
     # ── Lebar kolom ──────────────────────────────────────────────────────
-    col_widths = [8, 7, 11, 22, 16, 26, 6, 9, 9, 12, 12, 12, 12, 12, 12]
+    col_widths = BRS_CONFIG['ihk']['template']['col_widths']
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -352,31 +342,13 @@ def download_template_ihk():
 
 # ─── Upload Ekspor-Impor ───────────────────────────────────────────────────────
 
-REQUIRED_EKSPOR_COLS = [
-    'YEAR', 'MTH', 'KODE_HS', 'PODAL5',
-    'NEWCTRYCOD', 'FOB'
-]
 
-REQUIRED_IMPOR_COLS = [
-    'HS', 'K_NEGARA'
-]
-
-REQUIRED_IMPOR_EXCEL_COLS = [
-    'BLN', 'THN_PROSES', 'KODE_HS', 'NEGARA', 'NILAI'
-]
-
-REQUIRED_EKSPOR_EXCEL_COLS = [
-    'BLN_PROSES', 'THN_PROSES', 'PELABUHAN', 
-    'KODE_HS', 'NEGARA', 'FOB'
-]
-
-
-@main.route('/upload-ekspor-impor', methods=['GET', 'POST'])
+@main.route('/dia-brs/ekspor-impor/upload', methods=['GET', 'POST'])
 @login_required
 @_require_akses('akses_ekspor_impor')
 def upload_ekspor_impor():
     if request.method == 'GET':
-        return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor')
+        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor')
 
     form_type = request.form.get('form_type', '').strip()  # 'ekspor' atau 'impor'
     task_id   = request.form.get('task_id', '').strip()
@@ -384,16 +356,16 @@ def upload_ekspor_impor():
 
     # ── Tentukan kolom wajib & label berdasarkan form_type ──────────────────
     if form_type == 'ekspor':
-        required_cols = REQUIRED_EKSPOR_COLS
+        required_cols = BRS_CONFIG['ekspor']['required_cols']
         label         = 'Ekspor'
         active_tab    = 'ekspor'
     elif form_type == 'impor':
-        required_cols = REQUIRED_IMPOR_COLS
+        required_cols = BRS_CONFIG['impor']['required_cols']
         label         = 'Impor'
         active_tab    = 'impor'
     else:
         flash('Tipe form tidak valid.', 'danger')
-        return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor')
+        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor')
 
     # ── Validasi file ────────────────────────────────────────────────────────
     errors = []
@@ -458,13 +430,13 @@ def upload_ekspor_impor():
     # ── Mapping jika Excel Ekspor ───────────────────────────────────────────
     if is_excel and form_type == 'ekspor':
         # Validasi kolom excel khusus ekspor
-        missing_excel = [c for c in REQUIRED_EKSPOR_EXCEL_COLS if c not in df.columns]
+        missing_excel = [c for c in BRS_CONFIG['ekspor']['excel_cols'] if c not in df.columns]
         if missing_excel:
             flash(
                 f'Kolom Excel Ekspor tidak lengkap. Kolom yang kurang: {", ".join(missing_excel)}',
                 'danger',
             )
-            return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+            return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
         
         # Rename ke format yang diharapkan process_ekspor_upload
         mapping = {
@@ -477,18 +449,18 @@ def upload_ekspor_impor():
         }
         df = df.rename(columns=mapping)
         
-        required_cols = REQUIRED_EKSPOR_COLS # Gunakan standard required cols setelah rename
+        required_cols = BRS_CONFIG['ekspor']['required_cols'] # Gunakan standard required cols setelah rename
 
     # ── Mapping jika Excel/DBF Impor ──────────────────────────────────────────
     if form_type == 'impor':
         if is_excel:
-            missing_excel = [c for c in REQUIRED_IMPOR_EXCEL_COLS if c not in df.columns]
+            missing_excel = [c for c in BRS_CONFIG['impor']['excel_cols'] if c not in df.columns]
             if missing_excel:
                 flash(
                     f'Kolom Excel Impor tidak lengkap. Kurang: {", ".join(missing_excel)}',
                     'danger',
                 )
-                return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+                return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
             
             # Rename Excel Impor -> Standard DBF Impor format
             mapping_impor = {
@@ -506,7 +478,7 @@ def upload_ekspor_impor():
             
             if not bulan or not tahun:
                 flash('Bulan dan Tahun wajib diisi untuk upload DBF Impor.', 'danger')
-                return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+                return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
             
             # Tambahkan ke dataframe agar strukturnya sama dengan ekspor / excel impor
             df['YEAR'] = str(tahun)
@@ -517,11 +489,11 @@ def upload_ekspor_impor():
             
             if expected_n_col not in df.columns:
                 flash(f'Kolom DBF Impor tidak lengkap. Kolom yang kurang: {expected_n_col}', 'danger')
-                return render_template('upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
+                return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=active_tab)
                 
             df = df.rename(columns={expected_n_col: 'N1225'})
 
-        required_cols = REQUIRED_IMPOR_COLS + ['N1225', 'YEAR', 'MTH']
+        required_cols = BRS_CONFIG['impor']['required_cols'] + ['N1225', 'YEAR', 'MTH']
 
     # ── Validasi kolom (General) ──────────────────────────────────────────────
     missing_cols = [c for c in required_cols if c not in df.columns]
@@ -577,7 +549,7 @@ def upload_ekspor_impor():
 
 # ── Download Template Ekspor ───────────────────────────────────────────────────
 
-@main.route('/download-template-ekspor')
+@main.route('/dia-brs/ekspor-impor/template-ekspor')
 @login_required
 @_require_akses('akses_ekspor_impor')
 def download_template_ekspor():
@@ -586,8 +558,8 @@ def download_template_ekspor():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    COLS = REQUIRED_EKSPOR_EXCEL_COLS
-    SAMPLE = ['1', '2024', '33494', '01061100', '516', '1436.400']
+    COLS = BRS_CONFIG['ekspor']['excel_cols']
+    SAMPLE = BRS_CONFIG['ekspor']['template']['sample']
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -614,7 +586,7 @@ def download_template_ekspor():
         # cell.font      = sfont
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    col_widths = [8, 6, 10, 10, 14, 12]
+    col_widths = BRS_CONFIG['ekspor']['template']['col_widths']
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A2'
@@ -632,7 +604,7 @@ def download_template_ekspor():
 
 # ── Download Template Impor ────────────────────────────────────────────────────
 
-@main.route('/download-template-impor')
+@main.route('/dia-brs/ekspor-impor/template-impor')
 @login_required
 @_require_akses('akses_ekspor_impor')
 def download_template_impor():
@@ -641,8 +613,8 @@ def download_template_impor():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    COLS   = REQUIRED_IMPOR_EXCEL_COLS
-    SAMPLE = ['1', '2024', '32129029', '516', '1186.0']
+    COLS   = BRS_CONFIG['impor']['excel_cols']
+    SAMPLE = BRS_CONFIG['impor']['template']['sample']
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -669,7 +641,7 @@ def download_template_impor():
         # cell.font      = sfont
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    col_widths = [8, 12, 16, 14, 16, 14]
+    col_widths = BRS_CONFIG['impor']['template']['col_widths']
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A2'
@@ -687,17 +659,12 @@ def download_template_impor():
 
 # ─── Upload NTP ───────────────────────────────────────────────────────────────
 
-REQUIRED_NTP_COLS = [
-    'Tahun', 'Bulan', 'Kode Provinsi', 'Nama Provinsi',
-    'NTP', 'NTPP', 'NTPH', 'NTPN', 'NTPF', 'NTPE',
-]
-
-@main.route('/upload-ntp', methods=['GET', 'POST'])
+@main.route('/dia-brs/ntp/upload', methods=['GET', 'POST'])
 @login_required
 @_require_akses('akses_ntp')
 def upload_ntp():
     if request.method == 'GET':
-        return render_template('upload_ntp.html', title='Upload Excel NTP')
+        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
     bulan   = request.form.get('bulan', '').strip()
     tahun   = request.form.get('tahun', '').strip()
@@ -718,29 +685,29 @@ def upload_ntp():
     if errors:
         for e in errors:
             flash(e, 'danger')
-        return render_template('upload_ntp.html', title='Upload Excel NTP')
+        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
     try:
         import pandas as pd
         df = pd.read_excel(file, header=2, dtype=str).fillna('')
     except Exception as e:
         flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('upload_ntp.html', title='Upload Excel NTP')
+        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
-    missing_cols = [c for c in REQUIRED_NTP_COLS if c not in df.columns]
+    missing_cols = [c for c in BRS_CONFIG['ntp']['required_cols'] if c not in df.columns]
     if missing_cols:
         flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
-        return render_template('upload_ntp.html', title='Upload Excel NTP')
+        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('upload_ntp.html', title='Upload Excel NTP')
+        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
     flash('File berhasil dibaca. Fitur upload NTP ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('upload_ntp.html', title='Upload Excel NTP')
+    return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
 
-@main.route('/download-template-ntp')
+@main.route('/dia-brs/ntp/template')
 @login_required
 @_require_akses('akses_ntp')
 def download_template_ntp():
@@ -749,8 +716,8 @@ def download_template_ntp():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    COLS = REQUIRED_NTP_COLS
-    SAMPLE = ['2026', '8', '33', 'JAWA TENGAH', '105.12', '102.30', '107.50', '103.00', '108.20', '104.10']
+    COLS = BRS_CONFIG['ntp']['required_cols']
+    SAMPLE = BRS_CONFIG['ntp']['template']['sample']
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -800,17 +767,12 @@ def download_template_ntp():
 
 # ─── Upload Pariwisata ────────────────────────────────────────────────────────
 
-REQUIRED_PARIWISATA_COLS = [
-    'Tahun', 'Bulan', 'Nama Hotel', 'Kelas Hotel',
-    'TPK', 'RATS', 'Tamu Asing', 'Tamu Domestik',
-]
-
-@main.route('/upload-pariwisata', methods=['GET', 'POST'])
+@main.route('/dia-brs/pariwisata/upload', methods=['GET', 'POST'])
 @login_required
 @_require_akses('akses_pariwisata')
 def upload_pariwisata():
     if request.method == 'GET':
-        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
     bulan   = request.form.get('bulan', '').strip()
     tahun   = request.form.get('tahun', '').strip()
@@ -831,29 +793,29 @@ def upload_pariwisata():
     if errors:
         for e in errors:
             flash(e, 'danger')
-        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
     try:
         import pandas as pd
         df = pd.read_excel(file, header=2, dtype=str).fillna('')
     except Exception as e:
         flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
-    missing_cols = [c for c in REQUIRED_PARIWISATA_COLS if c not in df.columns]
+    missing_cols = [c for c in BRS_CONFIG['pariwisata']['required_cols'] if c not in df.columns]
     if missing_cols:
         flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
-        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
     flash('File berhasil dibaca. Fitur upload Pariwisata ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('upload_pariwisata.html', title='Upload Excel Pariwisata')
+    return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
 
-@main.route('/download-template-pariwisata')
+@main.route('/dia-brs/pariwisata/template')
 @login_required
 @_require_akses('akses_pariwisata')
 def download_template_pariwisata():
@@ -862,8 +824,8 @@ def download_template_pariwisata():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    COLS = REQUIRED_PARIWISATA_COLS
-    SAMPLE = ['2026', '8', 'Grand Artos', 'Bintang 4', '62.50', '2.10', '120', '850']
+    COLS = BRS_CONFIG['pariwisata']['required_cols']
+    SAMPLE = BRS_CONFIG['pariwisata']['template']['sample']
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -913,17 +875,12 @@ def download_template_pariwisata():
 
 # ─── Upload Transportasi ──────────────────────────────────────────────────────
 
-REQUIRED_TRANSPORTASI_COLS = [
-    'Tahun', 'Bulan', 'Moda', 'Nama Perusahaan',
-    'Penumpang Berangkat', 'Penumpang Datang', 'Barang Muat', 'Barang Bongkar',
-]
-
-@main.route('/upload-transportasi', methods=['GET', 'POST'])
+@main.route('/dia-brs/transportasi/upload', methods=['GET', 'POST'])
 @login_required
 @_require_akses('akses_transportasi')
 def upload_transportasi():
     if request.method == 'GET':
-        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
     bulan   = request.form.get('bulan', '').strip()
     tahun   = request.form.get('tahun', '').strip()
@@ -944,29 +901,29 @@ def upload_transportasi():
     if errors:
         for e in errors:
             flash(e, 'danger')
-        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
     try:
         import pandas as pd
         df = pd.read_excel(file, header=2, dtype=str).fillna('')
     except Exception as e:
         flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
-    missing_cols = [c for c in REQUIRED_TRANSPORTASI_COLS if c not in df.columns]
+    missing_cols = [c for c in BRS_CONFIG['transportasi']['required_cols'] if c not in df.columns]
     if missing_cols:
         flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
-        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
     flash('File berhasil dibaca. Fitur upload Transportasi ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('upload_transportasi.html', title='Upload Excel Transportasi')
+    return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
 
-@main.route('/download-template-transportasi')
+@main.route('/dia-brs/transportasi/template')
 @login_required
 @_require_akses('akses_transportasi')
 def download_template_transportasi():
@@ -975,8 +932,8 @@ def download_template_transportasi():
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    COLS = REQUIRED_TRANSPORTASI_COLS
-    SAMPLE = ['2026', '8', 'Udara', 'Garuda Indonesia', '12500', '11800', '850.50', '920.30']
+    COLS = BRS_CONFIG['transportasi']['required_cols']
+    SAMPLE = BRS_CONFIG['transportasi']['template']['sample']
 
     wb = openpyxl.Workbook()
     ws = wb.active

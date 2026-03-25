@@ -123,10 +123,7 @@
                     <p class="text-muted small mb-3">Pastikan file Excel memiliki kolom berikut <strong>(header di baris
                             ke-3)</strong>:</p>
                     <div class="d-flex flex-wrap gap-1 mb-3">
-                        {% for col in [
-                        'Tahun','Bulan','Moda','Nama Perusahaan',
-                        'Penumpang Berangkat','Penumpang Datang','Barang Muat','Barang Bongkar'
-                        ] %}
+                        {% for col in brs_config['transportasi']['required_cols'] %}
                         <span class="badge rounded-pill px-3 py-2 bg-warning-subtle text-warning"
                             style="font-size:0.78rem;">{{ col }}</span>
                         {% endfor %}
@@ -134,7 +131,7 @@
                     <hr />
                     <p class="small text-muted mb-2"><strong>Sheet Google Sheets yang diupdate:</strong></p>
                     <div class="d-flex flex-wrap gap-1">
-                        {% for s in ['Udara','Laut','KA','ASDP'] %}
+                        {% for s in brs_config['transportasi']['sheets'] %}
                         <span class="badge bg-warning-subtle text-warning">{{ s }}</span>
                         {% endfor %}
                     </div>

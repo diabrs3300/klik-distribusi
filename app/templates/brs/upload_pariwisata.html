@@ -7,7 +7,7 @@
     <nav aria-label="breadcrumb" class="mb-3">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{{ url_for('main.dia_brs') }}">Dashboard</a></li>
-            <li class="breadcrumb-item"><a href="{{ url_for('main.brs_ntp') }}">BRS NTP</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('main.brs_pariwisata') }}">BRS Pariwisata</a></li>
             <li class="breadcrumb-item active">Upload Excel</li>
         </ol>
     </nav>
@@ -27,15 +27,15 @@
     {% endwith %}
 
     <!-- Header -->
-    <div class="detail-header mb-4 p-4 rounded-3 bg-success-subtle">
+    <div class="detail-header mb-4 p-4 rounded-3" style="background:#ede9fe;">
         <div class="d-flex align-items-center gap-3">
-            <div class="brs-icon-wrap-lg bg-success text-white">
+            <div class="brs-icon-wrap-lg text-white" style="background:#7c3aed;">
                 <i class="bi bi-cloud-upload fs-2"></i>
             </div>
             <div>
-                <h3 class="fw-bold mb-1">Upload Excel NTP</h3>
+                <h3 class="fw-bold mb-1">Upload Excel Pariwisata</h3>
                 <p class="mb-0 text-muted">
-                    Upload file Excel BRS NTP ke Google Sheets secara otomatis.
+                    Upload file Excel BRS Pariwisata ke Google Sheets secara otomatis.
                     Header Excel harus berada di <strong>baris ke-3</strong>.
                 </p>
             </div>
@@ -59,7 +59,7 @@
             <div class="card shadow-sm border-0">
                 <div class="card-header bg-white py-3 px-4 border-bottom">
                     <h6 class="fw-bold mb-0">
-                        <i class="bi bi-upload me-2 text-success"></i>Form Upload
+                        <i class="bi bi-upload me-2" style="color:#7c3aed;"></i>Form Upload
                     </h6>
                 </div>
                 <div class="card-body p-4">
@@ -103,7 +103,8 @@
                             <div class="form-text">Hanya file <code>.xlsx</code>. Header Excel di baris ke-3.</div>
                         </div>
 
-                        <button type="submit" class="btn btn-success px-4 py-2 fw-semibold" id="submitBtn">
+                        <button type="submit" class="btn px-4 py-2 fw-semibold text-white" id="submitBtn"
+                            style="background:#7c3aed;">
                             <i class="bi bi-cloud-upload me-2"></i>Upload ke Google Sheets
                         </button>
                     </form>
@@ -123,27 +124,24 @@
                     <p class="text-muted small mb-3">Pastikan file Excel memiliki kolom berikut <strong>(header di baris
                             ke-3)</strong>:</p>
                     <div class="d-flex flex-wrap gap-1 mb-3">
-                        {% for col in [
-                        'Tahun','Bulan','Kode Provinsi','Nama Provinsi',
-                        'NTP','NTPP','NTPH','NTPN','NTPF','NTPE'
-                        ] %}
-                        <span class="badge rounded-pill px-3 py-2 bg-success-subtle text-success"
-                            style="font-size:0.78rem;">{{ col }}</span>
+                        {% for col in brs_config['pariwisata']['required_cols'] %}
+                        <span class="badge rounded-pill px-3 py-2"
+                            style="font-size:0.78rem; background:#ede9fe; color:#7c3aed;">{{ col }}</span>
                         {% endfor %}
                     </div>
                     <hr />
                     <p class="small text-muted mb-2"><strong>Sheet Google Sheets yang diupdate:</strong></p>
                     <div class="d-flex flex-wrap gap-1">
-                        {% for s in ['NTP','NTPP','NTPH','NTPN','NTPF','NTPE'] %}
-                        <span class="badge bg-success-subtle text-success">{{ s }}</span>
+                        {% for s in brs_config['pariwisata']['sheets'] %}
+                        <span class="badge" style="background:#ede9fe; color:#7c3aed;">{{ s }}</span>
                         {% endfor %}
                     </div>
 
                     <hr />
 
                     <!-- Tombol Download Template -->
-                    <a href="{{ url_for('main.download_template_ntp') }}" class="btn btn-success w-100 fw-semibold"
-                        download>
+                    <a href="{{ url_for('main.download_template_pariwisata') }}"
+                        class="btn w-100 fw-semibold text-white" style="background:#7c3aed;" download>
                         <i class="bi bi-file-earmark-arrow-down me-2"></i>Download Template Excel
                     </a>
                     <div class="form-text mt-1 text-center">
@@ -156,8 +154,8 @@
     </div>
 
     <div class="mt-3">
-        <a href="{{ url_for('main.brs_ntp') }}" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Kembali ke BRS NTP
+        <a href="{{ url_for('main.brs_pariwisata') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Kembali ke BRS Pariwisata
         </a>
     </div>
 

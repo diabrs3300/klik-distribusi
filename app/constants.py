@@ -10,7 +10,7 @@ DOCS_SHEET_MAP = {
     'IHK'         : 'IHK',
     'NTP'         : 'NTP',
     'Transportasi': 'Transportasi',
-    'Ekspor'      : 'Ekspor',
+    'Ekspor Impor': 'Exim',
     'Pariwisata'  : 'Pariwisata',
 }
 

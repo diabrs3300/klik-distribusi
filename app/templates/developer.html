@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid px-4">
+
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('main.dia_brs') }}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Tim Pengembang</li>
+        </ol>
+    </nav>
+
+    <div class="detail-header mb-5 p-5 rounded-4 bg-dark text-white shadow-lg overflow-hidden position-relative">
+        <div class="position-relative z-1">
+            <h2 class="fw-bold mb-2">The Minds Behind DIA BRS</h2>
+            <p class="lead mb-0 opacity-75">Dedikasi untuk Digital Integration and Automation for Berita Resmi
+                Statistik Jawa Tengah</p>
+        </div>
+        <!-- Subtle Background Pattern -->
+        <div class="position-absolute top-0 end-0 p-4 opacity-10">
+            <i class="bi bi-code-slash display-1"></i>
+        </div>
+    </div>
+
+    <div class="row g-4 justify-content-center">
+        <!-- 1. Duta -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body p-4 text-center">
+                    <div class="dev-avatar-wrap mb-4 mx-auto bg-primary text-white rounded-circle d-flex align-items-center justify-content-center"
+                        style="width: 80px; height: 80px;">
+                        <span class="fs-2 fw-bold">D</span>
+                    </div>
+                    <h5 class="fw-bold mb-1">Dutatama Rosewika T.H.</h5>
+                    <p class="text-primary small fw-semibold mb-3">Project Lead & Web Developer</p>
+                    <hr class="my-3 opacity-10">
+                    <p class="text-muted small mb-0 px-2">
+                        Bertanggung jawab atas perencanaan, pengembangan, dan integrasi sistem end-to-end.
+                        Mengembangkan web app serta menghubungkan backend dengan layanan Google Sheets melalui Google
+                        Cloud API.
+                    </p>
+                </div>
+                <div class="card-footer bg-light border-0 py-3 text-center">
+                    <div class="d-flex justify-content-center gap-3">
+                        <span class="badge bg-white text-dark shadow-xs border">Flask</span>
+                        <span class="badge bg-white text-dark shadow-xs border">G-Cloud API</span>
+                        <span class="badge bg-white text-dark shadow-xs border">G-App Script</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Isna -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body p-4 text-center">
+                    <div class="dev-avatar-wrap mb-4 mx-auto bg-danger text-white rounded-circle d-flex align-items-center justify-content-center"
+                        style="width: 80px; height: 80px;">
+                        <span class="fs-2 fw-bold">I</span>
+                    </div>
+                    <h5 class="fw-bold mb-1">Isnatul Mu'anissah</h5>
+                    <p class="text-danger small fw-semibold mb-3">Document Integration Engineer</p>
+                    <hr class="my-3 opacity-10">
+                    <p class="text-muted small mb-0 px-2">
+                        Mengintegrasikan hasil pengolahan data ke dalam berbagai format dokumen dan media presentasi
+                        (Docs, Slides, Drawing) secara otomatis dan sinkron.
+                    </p>
+                </div>
+                <div class="card-footer bg-light border-0 py-3 text-center">
+                    <div class="d-flex justify-content-center gap-3">
+                        <span class="badge bg-white text-dark shadow-xs border">G-Docs</span>
+                        <span class="badge bg-white text-dark shadow-xs border">G-Slides</span>
+                        <span class="badge bg-white text-dark shadow-xs border">G-Drawing</span>
+                        <span class="badge bg-white text-dark shadow-xs border">Linked Object</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Azmi -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-lift">
+                <div class="card-body p-4 text-center">
+                    <div class="dev-avatar-wrap mb-4 mx-auto bg-success text-white rounded-circle d-flex align-items-center justify-content-center"
+                        style="width: 80px; height: 80px;">
+                        <span class="fs-2 fw-bold">A</span>
+                    </div>
+                    <h5 class="fw-bold mb-1">Azmi Zulfani Putri</h5>
+                    <p class="text-success small fw-semibold mb-3">Data Processing Engineer</p>
+                    <hr class="my-3 opacity-10">
+                    <p class="text-muted small mb-0 px-2">
+                        Menangani logika pemrosesan data di Google Sheets (Backend), termasuk pengolahan, transformasi,
+                        tabulasi, dan visualisasi data untuk menghasilkan output yang terstruktur.
+                    </p>
+                </div>
+                <div class="card-footer bg-light border-0 py-3 text-center">
+                    <div class="d-flex justify-content-center gap-3">
+                        <span class="badge bg-white text-dark shadow-xs border">G-Sheets</span>
+                        <span class="badge bg-white text-dark shadow-xs border">Pengolahan</span>
+                        <span class="badge bg-white text-dark shadow-xs border">Tabulasi</span>
+                        <span class="badge bg-white text-dark shadow-xs border">Visualisasi</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="mt-5 text-center">
+        <a href="{{ url_for('main.dia_brs') }}" class="btn btn-outline-secondary px-4 rounded-pill">
+            <i class="bi bi-arrow-left me-2"></i>Kembali ke Dashboard
+        </a>
+    </div>
+
+</div>
+
+<style>
+    .hover-lift {
+        transition: transform 0.25s ease, shadow 0.25s ease;
+    }
+
+    .hover-lift:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.1) !important;
+    }
+
+    .shadow-xs {
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.05);
+    }
+</style>
+{% endblock %}

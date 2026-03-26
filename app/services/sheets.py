@@ -11,7 +11,12 @@ from collections import OrderedDict
 from google.oauth2.service_account import Credentials
 from gspread.utils import rowcol_to_a1
 from gspread.exceptions import APIError
-from app.main.brs_cols import BRS_CONFIG
+from app.constants import (
+    DOCS_SPREADSHEET_ID, DOCS_SHEET_MAP, KLIK_SPREADSHEET_ID,
+    USERS_SPREADSHEET_ID, USERS_SHEET_NAME, DOCS_CACHE_TTL,
+    IHK_SPREADSHEET_ID, EKSPOR_IMPOR_SPREADSHEET_ID, IMPOR_SPREADSHEET_ID
+)
+from app.brs_cols import BRS_CONFIG
 
 
 _log = logging.getLogger(__name__)
@@ -44,7 +49,6 @@ def clear_progress(task_id: str):
 
 def _get_cached_data(cache_key: str, fetch_func, sub_key: str = None):
     """Generic helper to handle TTL caching for GSheets data."""
-    from app.constants import DOCS_CACHE_TTL
     now = time.time()
     cache = _CACHES[cache_key]
     
@@ -87,7 +91,6 @@ SCOPES = [
 
 def get_docs(section: str, fallback: list) -> list:
     """Ambil daftar dokumen untuk section BRS dari Google Sheets registry."""
-    from app.constants import DOCS_SPREADSHEET_ID, DOCS_SHEET_MAP
 
     if not DOCS_SPREADSHEET_ID: return fallback
     sheet_name = DOCS_SHEET_MAP.get(section)
@@ -113,8 +116,8 @@ def get_docs(section: str, fallback: list) -> list:
             idx_url   = _idx(['link', 'url'], 3)
 
             grouped = OrderedDict()
-            kat_icons = {'master': 'bi-pencil-fill', 'brs': 'bi-file-earmark-text-fill', 'folder': 'bi-folder2-open'}
-            item_icons = {'master': 'bi-file-earmark-excel-fill', 'brs': 'bi-file-earmark-text', 'folder': 'bi-folder'}
+            kat_icons = {'master': 'bi-pencil-fill', 'brs': 'bi-file-earmark-text-fill', 'database': 'bi-database-fill', 'folder': 'bi-folder2-open'}
+            item_icons = {'master': 'bi-file-earmark-excel-fill', 'brs': 'bi-file-earmark-text', 'database': 'bi-database', 'folder': 'bi-folder'}
 
             for row in rows[1:]:
                 if not any(row): continue
@@ -155,7 +158,6 @@ def clear_docs_cache(section: str = None):
 
 def get_klik_links() -> list:
     """Fetch daftar link portal dari Google Sheets."""
-
     if not KLIK_SPREADSHEET_ID: return []
 
     def _fetch():
@@ -190,7 +192,7 @@ def get_klik_links() -> list:
                 'Statistik Distribusi dan Jasa': 'purple', 'Lainnya': 'secondary',
             }
 
-            for row in rows[1:]:
+            for i, row in enumerate(rows[1:], start=1):
                 if not any(row): continue
                 nama = row[idx_nama].strip() if len(row) > idx_nama else ''
                 if not nama: continue
@@ -222,6 +224,8 @@ def get_klik_links() -> list:
             _log.error(f'get_klik_links() error: {e}')
             return None
 
+    return _get_cached_data('klik', _fetch)
+
 def clear_klik_cache():
     """Paksa refresh cache Klik Distribusi."""
     _CACHES['klik']['data'] = None
@@ -232,7 +236,6 @@ def clear_klik_cache():
 
 def get_users() -> dict:
     """Fetch daftar user dan hak akses dari Google Sheets."""
-    from app.constants import USERS_SPREADSHEET_ID, USERS_SHEET_NAME
     if not USERS_SPREADSHEET_ID: return {}
 
     def _fetch():
@@ -534,7 +537,6 @@ def _upsert_ihk_sheet(worksheet: gspread.Worksheet, dataframe, col_name: str, ex
 
 def process_ihk_upload(dataframe, col_name: str, task_id: str = None) -> dict:
     """Upload IHK DataFrame ke 7 sheet Google Sheets sekaligus."""
-    from app.constants import IHK_SPREADSHEET_ID
     set_progress(task_id, 10, "Menyambungkan ke Google Sheets API...")
     spreadsheet = _get_spreadsheet(IHK_SPREADSHEET_ID)
 
@@ -670,22 +672,25 @@ def _upsert_recap_sheet(worksheet: gspread.Worksheet, months_recap_data: dict) -
     return len(new_rows), len(months_recap_data) - len(new_rows)
 
 def _migrate_exim_header(worksheet, header_row, sheet_name, upload_type):
-    """Migrate semantic keys in header to real DBF column names."""
-    all_dbf = {}
+    """Update legacy DBF headers to new semantic keys (KeyPelabuhan, etc.)."""
+    # Create a mapping from real DBF column name to semantic key
+    dbf_to_semantic = {}
     for mod in ('ekspor', 'impor'):
-        all_dbf.update(BRS_CONFIG[mod]['required_dbf_cols'])
-        
-    semantic_cols = [(i, h) for i, h in enumerate(header_row) if h in all_dbf]
-    if not semantic_cols: return header_row
+        for sem, dbf in BRS_CONFIG[mod]['required_dbf_cols'].items():
+            dbf_to_semantic[dbf.upper()] = sem
 
     updates = []
-    for idx, semantic in semantic_cols:
-        real = all_dbf[semantic]
-        _log.info(f'Migrasi header {semantic!r} -> {real!r} di sheet {sheet_name!r}')
-        header_row[idx] = real
-        updates.append({'range': rowcol_to_a1(1, idx + 1), 'values': [[real]]})
+    for i, h in enumerate(header_row):
+        h_upper = str(h).strip().upper()
+        if h_upper in dbf_to_semantic:
+            semantic = dbf_to_semantic[h_upper]
+            if h != semantic:
+                _log.info(f"Migrasi header legacy '{h}' -> '{semantic}' di sheet {sheet_name}")
+                header_row[i] = semantic
+                updates.append({'range': rowcol_to_a1(1, i + 1), 'values': [[semantic]]})
     
-    if updates: worksheet.batch_update(updates)
+    if updates:
+        worksheet.batch_update(updates)
     
     # Remove accidental duplicates from failed previous runs
     seen, to_delete = {}, []
@@ -767,7 +772,7 @@ def _upsert_exim_sheet_bulk(worksheet: gspread.Worksheet, months_data: dict, key
     key_indices = [header_row.index(k) for k in key_names]
 
     # 3. Process Data
-    lookup = {tuple(str(row[i]).strip() for i in key_indices): i + 1 for i, row in enumerate(all_values[1:]) if any(row)}
+    lookup = {tuple(str(row[idx]).strip() for idx in key_indices): i + 2 for i, row in enumerate(all_values[1:]) if any(row)}
     batch_updates, header_updates, new_rows_map = [], [], {}
     inserted = updated = 0
 
@@ -818,20 +823,20 @@ def _upsert_exim_sheet_bulk(worksheet: gspread.Worksheet, months_data: dict, key
 def _process_exim_orchestrator(dataframe, upload_type: str, task_id: str = None) -> dict:
     """Internal shared orchestrator for Ekspor and Impor uploads."""
     import pandas as pd
-    from app.constants import EKSPOR_IMPOR_SPREADSHEET_ID, IMPOR_SPREADSHEET_ID
     
+    set_progress(task_id, 10, "Menyambungkan ke Google Sheets...")
     config = BRS_CONFIG[upload_type]
     ss_id = EKSPOR_IMPOR_SPREADSHEET_ID if upload_type == 'ekspor' else IMPOR_SPREADSHEET_ID
     
-    set_progress(task_id, 10, "Menyambungkan ke Google Sheets API...")
+    set_progress(task_id, 15, "Membuka spreadsheet...")
     spreadsheet = _get_spreadsheet(ss_id)
     
     _dbf = config['required_dbf_cols']
-    val_col = _dbf['KeyNilai']
+    val_col = 'KeyNilai'  # Use internal semantic name
     dataframe['KeyNilai'] = pd.to_numeric(dataframe['KeyNilai'], errors='coerce').fillna(0)
     
     # 1. Prepare month groups
-    set_progress(task_id, 20, "Mempersiapkan pengelompokan baris per bulan...")
+    set_progress(task_id, 30, "Mempersiapkan pengelompokan baris per bulan...")
     months_payload = {}
     for (year, month), group in dataframe.groupby(['KeyTahun', 'KeyBulan']):
         try:
@@ -842,28 +847,28 @@ def _process_exim_orchestrator(dataframe, upload_type: str, task_id: str = None)
     if not months_payload:
         return {'inserted': 0, 'updated': 0, 'details': [{'error': 'No valid month/year data found'}]}
 
+    set_progress(task_id, 45, "Memulai migrasi dan sinkronisasi data...")
     total_inserted = total_updated = 0
     details = []
     targets = list(config['targets'].items())
     
     # 2. Process data sheets
+    num_targets = len(targets)
     for idx, (sh_name, group_key) in enumerate(targets, 1):
-        set_progress(task_id, 30 + (idx-1)*20, f"Memproses sheet '{sh_name}'...")
+        p_start = 50 + (idx-1) * (35 // num_targets)
+        set_progress(task_id, p_start, f"Memproses sheet '{sh_name}'...")
         
         keys_list = [group_key] if isinstance(group_key, str) else group_key
-        rename_map = {k: _dbf[k] for k in keys_list}
-        rename_map['KeyNilai'] = val_col
         
         prepared_months = {}
         for yymm, group in months_payload.items():
             summed = group.groupby(keys_list)['KeyNilai'].sum().reset_index()
-            prepared_months[yymm] = summed.rename(columns=rename_map)
+            prepared_months[yymm] = summed
         
-        real_key_col = [_dbf[k] for k in keys_list]
-        if len(real_key_col) == 1: real_key_col = real_key_col[0]
+        key_col_for_upsert = keys_list[0] if len(keys_list) == 1 else keys_list
         
         worksheet = spreadsheet.worksheet(sh_name)
-        ins, upd = _retry_on_429(_upsert_exim_sheet_bulk)(worksheet, prepared_months, real_key_col, val_col, sh_name, upload_type=upload_type)
+        ins, upd = _retry_on_429(_upsert_exim_sheet_bulk)(worksheet, prepared_months, key_col_for_upsert, val_col, sh_name, upload_type=upload_type)
         total_inserted += ins
         total_updated += upd
         details.append({'sheet': sh_name, 'inserted': ins, 'updated': upd})

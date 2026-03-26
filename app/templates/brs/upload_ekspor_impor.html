@@ -1,13 +1,20 @@
 {% extends "base.html" %}
+{% block title %}Upload Ekspor Impor{% endblock %}
 
 {% block content %}
+{% set session_stats = session.pop('upload_stats', None) %}
+{% if session_stats %}
+    {% set stats = session_stats %}
+    {% set active_tab = session.pop('active_tab', active_tab) %}
+    {% set last_upload = {'type': session.pop('upload_last_type', ''), 'rows': session.pop('upload_last_rows', 0)} %}
+{% endif %}
 <div class="container-fluid px-4">
 
     <!-- Breadcrumb -->
     <nav aria-label="breadcrumb" class="mb-3">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{{ url_for('main.dia_brs') }}">Dashboard</a></li>
-            <li class="breadcrumb-item"><a href="{{ url_for('main.brs_ekspor') }}">BRS Ekspor Impor</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('main.brs_ekspor_impor') }}">BRS Ekspor Impor</a></li>
             <li class="breadcrumb-item active">Upload DBF</li>
         </ol>
     </nav>
@@ -370,7 +377,7 @@
     </div><!-- /tab-content -->
 
     <div class="mt-1">
-        <a href="{{ url_for('main.brs_ekspor') }}" class="btn btn-outline-secondary">
+        <a href="{{ url_for('main.brs_ekspor_impor') }}" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left me-1"></i>Kembali ke BRS Ekspor Impor
         </a>
     </div>
@@ -380,88 +387,7 @@
 
 {% block scripts %}
 <script>
-    function handleUploadWithProgress(formId, btnId, textId, spinId, progressContainerId, progressBarId, progressTextId, progressPercentId) {
-        const form = document.getElementById(formId);
-        if (!form) return;
-
-        form.addEventListener('submit', async function (e) {
-            e.preventDefault();
-
-            const btn = document.getElementById(btnId);
-            const text = document.getElementById(textId);
-            const spin = document.getElementById(spinId);
-
-            const progressContainer = document.getElementById(progressContainerId);
-            const progressBar = document.getElementById(progressBarId);
-            const pText = document.getElementById(progressTextId);
-            const pPercent = document.getElementById(progressPercentId);
-
-
-            const fileInput = form.querySelector('input[type="file"]');
-            if (fileInput && fileInput.files.length > 0) {
-                const fileSizeMB = fileInput.files[0].size / 1024 / 1024;
-                if (fileSizeMB > 4.5) {
-                    alert('🔴 UKURAN FILE TERLALU BESAR!\n\nMaksimal ukuran yang diizinkan server adalah 4.5 MB.\nUkuran file Anda: ' + fileSizeMB.toFixed(2) + ' MB.\n\nSilakan hapus baris/kolom kosong atau compress DBF sebelum mengupload ulang.');
-                    return;
-                }
-            }
-
-            btn.disabled = true;
-            text.classList.add('d-none');
-            spin.classList.remove('d-none');
-
-            progressContainer.classList.remove('d-none');
-            progressBar.style.width = '0%';
-            progressBar.setAttribute('aria-valuenow', 0);
-            pPercent.textContent = '0%';
-            pText.textContent = 'Menyiapkan file...';
-
-            const taskId = 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-
-            const formData = new FormData(this);
-            formData.append('task_id', taskId);
-
-            const pollInterval = setInterval(async () => {
-                try {
-                    const res = await fetch(`/upload-progress/${taskId}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        progressBar.style.width = data.percent + '%';
-                        progressBar.setAttribute('aria-valuenow', data.percent);
-                        pPercent.textContent = data.percent + '%';
-                        if (data.message) {
-                            pText.textContent = data.message;
-                        }
-                    }
-                } catch (err) {
-                    console.warn('Gagal polling progress:', err);
-                }
-            }, 1000);
-
-            try {
-                const response = await fetch(window.location.href, {
-                    method: 'POST',
-                    body: formData,
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-
-                clearInterval(pollInterval);
-                const html = await response.text();
-
-                document.open();
-                document.write(html);
-                document.close();
-
-            } catch (error) {
-                clearInterval(pollInterval);
-                alert('Terjadi kesalahan koneksi saat mengupload file.');
-                btn.disabled = false;
-                text.classList.remove('d-none');
-                spin.classList.add('d-none');
-                progressContainer.classList.add('d-none');
-            }
-        });
-    }
+    // Submit listeners are now handled via handleUploadWithProgress in main.js
 
     handleUploadWithProgress('formEkspor', 'btnEkspor', 'btnEksporText', 'btnEksporSpin', 'progressContainerEkspor', 'progressBarEkspor', 'progressTextEkspor', 'progressPercentEkspor');
     handleUploadWithProgress('formImpor', 'btnImpor', 'btnImporText', 'btnImporSpin', 'progressContainerImpor', 'progressBarImpor', 'progressTextImpor', 'progressPercentImpor');

@@ -1,11 +1,11 @@
 import io
 import logging
 from functools import wraps
-from flask import render_template, request, redirect, url_for, flash, send_file, abort, jsonify
+from flask import render_template, request, redirect, url_for, flash, send_file, abort, jsonify, session
 from flask_login import login_required, current_user
 
 from app.main import main
-from app.main.brs_cols import BRS_CONFIG
+from app.brs_cols import BRS_CONFIG
 from app.services.sheets import (
     get_docs, get_klik_links, clear_docs_cache, clear_klik_cache,
     get_progress, clear_progress, process_ihk_upload,
@@ -207,6 +207,12 @@ def dia_brs():
     return render_template('dashboard.html', title='DIA BRS — Dashboard')
 
 
+@main.route('/dia-brs/developer')
+@login_required
+def developer():
+    return render_template('developer.html', title='Tim Pengembang — DIA BRS')
+
+
 
 @main.route('/dia-brs/ihk')
 @login_required
@@ -235,9 +241,9 @@ def brs_transportasi():
 @main.route('/dia-brs/ekspor-impor')
 @login_required
 @_require_akses('akses_ekspor_impor')
-def brs_ekspor():
-    docs = get_docs('Ekspor', fallback=[])
-    return render_template('brs/ekspor.html', title='BRS Ekspor Impor', docs=docs)
+def brs_ekspor_impor():
+    docs = get_docs('Ekspor Impor', fallback=[])
+    return render_template('brs/ekspor_impor.html', title='BRS Ekspor Impor', docs=docs)
 
 
 @main.route('/dia-brs/pariwisata')
@@ -303,6 +309,10 @@ def upload_ihk():
     filter_info = f'Hanya {len(matched_df)} dari {len(df)} baris yang sesuai — baris lain dilewati.' if len(matched_df) < len(df) else None
     col_name = tahun_str[2:] + params['bulan'].zfill(2)
 
+    from app.services.sheets import set_progress
+    if params['task_id']:
+        set_progress(params['task_id'], 5, "Menyiapkan data untuk upload...")
+
     # ── Proses ke Google Sheets ───────────────────────────────────────────────
     try:
         from app.services.sheets import process_ihk_upload, clear_progress
@@ -321,6 +331,14 @@ def upload_ihk():
         return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
 
     if params['task_id']: clear_progress(params['task_id'])
+    
+    # AJAX support for smooth reload + form reset
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        session['upload_stats'] = stats
+        session['upload_col_name'] = col_name
+        session['upload_filter_info'] = filter_info
+        return jsonify({'status': 'success'})
+
     return render_template('brs/upload_ihk.html', title='Upload Excel IHK-Inflasi', stats=stats, col_name=col_name, filter_info=filter_info)
 
 
@@ -385,20 +403,26 @@ def upload_ekspor_impor():
                 flash(f'Kolom DBF Impor tidak lengkap. Kolom yang kurang: {val_col}', 'danger')
                 return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
             df = df.rename(columns={val_col: 'KeyNilai'})
+            cols_map['KeyNilai'] = val_col
 
     except Exception as e:
         flash(f'Gagal membaca file: {e}', 'danger')
         return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
 
     # ── Validasi & Upload ────────────────────────────────────────────────────
-    missing = [c for c in _config['required_dbf_cols'].keys() if c not in df.columns]
-    if missing:
-        flash(f'Kolom tidak lengkap. Kurang: {", ".join(missing)}', 'danger')
+    missing_semantic = [c for c in _config['required_dbf_cols'].keys() if c not in df.columns]
+    if missing_semantic:
+        missing_real = [cols_map.get(c, c) for c in missing_semantic]
+        flash(f'Kolom tidak lengkap. Kurang: {", ".join(missing_real)}', 'danger')
         return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
 
     if df.empty:
         flash('File tidak memiliki data.', 'warning')
         return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+
+    from app.services.sheets import set_progress
+    if params['task_id']:
+        set_progress(params['task_id'], 5, "Menyiapkan data untuk upload...")
 
     try:
         if form_type == 'ekspor': stats = process_ekspor_upload(df, task_id=params['task_id'])
@@ -408,6 +432,15 @@ def upload_ekspor_impor():
         return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
         
     if params['task_id']: clear_progress(params['task_id'])
+    
+    # AJAX support for smooth reload + form reset
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        session['upload_stats'] = stats
+        session['upload_last_type'] = form_type.capitalize()
+        session['upload_last_rows'] = len(df)
+        session['active_tab'] = form_type
+        return jsonify({'status': 'success'})
+
     return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type, last_upload={'type': form_type.capitalize(), 'rows': len(df)}, stats=stats)
 
 
@@ -458,6 +491,15 @@ def upload_ntp():
         flash('File Excel tidak memiliki data.', 'warning')
         return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
+    # AJAX support for smooth reload + form reset
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        session['upload_stats'] = {'inserted': 0, 'updated': 0} # Placeholder
+        return jsonify({'status': 'success'})
+
+    from app.services.sheets import set_progress
+    if params['task_id']:
+        set_progress(params['task_id'], 100, "Validasi selesai (Fitur GSheets segera hadir)")
+
     flash('File berhasil dibaca. Fitur upload NTP ke Google Sheets sedang dalam pengembangan.', 'info')
     return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
 
@@ -501,6 +543,15 @@ def upload_pariwisata():
         flash('File Excel tidak memiliki data.', 'warning')
         return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
+    # AJAX support for smooth reload + form reset
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        session['upload_stats'] = {'inserted': 0, 'updated': 0} # Placeholder
+        return jsonify({'status': 'success'})
+
+    from app.services.sheets import set_progress
+    if params['task_id']:
+        set_progress(params['task_id'], 100, "Validasi selesai (Fitur GSheets segera hadir)")
+
     flash('File berhasil dibaca. Fitur upload Pariwisata ke Google Sheets sedang dalam pengembangan.', 'info')
     return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
 
@@ -543,6 +594,15 @@ def upload_transportasi():
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
         return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
+
+    # AJAX support for smooth reload + form reset
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        session['upload_stats'] = {'inserted': 0, 'updated': 0} # Placeholder
+        return jsonify({'status': 'success'})
+
+    from app.services.sheets import set_progress
+    if params['task_id']:
+        set_progress(params['task_id'], 100, "Validasi selesai (Fitur GSheets segera hadir)")
 
     flash('File berhasil dibaca. Fitur upload Transportasi ke Google Sheets sedang dalam pengembangan.', 'info')
     return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')

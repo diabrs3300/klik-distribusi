@@ -23,8 +23,37 @@ document.addEventListener('DOMContentLoaded', () => {
           formToReset.querySelectorAll('input').forEach(input => {
               input.dispatchEvent(new Event('change', { bubbles: true }));
           });
+          sessionStorage.removeItem('reset_upload_form_id');
+          sessionStorage.removeItem('saved_col_map'); // Also clear mapping on success
+          sessionStorage.removeItem('saved_file_ext_ekspor');
+          sessionStorage.removeItem('saved_file_ext_impor');
       }
-      sessionStorage.removeItem('reset_upload_form_id');
+  }
+
+  // Restore saved mapping values if any (for error persistence)
+  const savedMapping = sessionStorage.getItem('saved_col_map');
+  if (savedMapping) {
+      try {
+          const mapping = JSON.parse(savedMapping);
+          Object.keys(mapping).forEach(name => {
+              const inputs = document.querySelectorAll(`input[name="${name}"]`);
+              inputs.forEach(inp => {
+                  inp.value = mapping[name];
+                  
+                  // Restore data-last-type for ekspor/impor inputs to prevent Smart Reset from overwriting
+                  if (inp.classList.contains('eksporColInput')) {
+                      const lastExt = sessionStorage.getItem('saved_file_ext_ekspor');
+                      if (lastExt) inp.setAttribute('data-last-type', lastExt);
+                  }
+                  if (inp.classList.contains('imporColInput')) {
+                      const lastExt = sessionStorage.getItem('saved_file_ext_impor');
+                      if (lastExt) inp.setAttribute('data-last-type', lastExt);
+                  }
+              });
+          });
+      } catch (e) {
+          console.error('Error restoring mapping:', e);
+      }
   }
 });
 
@@ -76,6 +105,19 @@ function handleUploadWithProgress(formId, btnId, textId, spinId, progressContain
         const formData = new FormData(this);
         formData.append('task_id', taskId);
 
+        // Save current mapping to sessionStorage for persistence on failure
+        const mapping = {};
+        form.querySelectorAll('input[name^="col_map["]').forEach(inp => {
+            mapping[inp.name] = inp.value;
+        });
+        sessionStorage.setItem('saved_col_map', JSON.stringify(mapping));
+
+        // Also save extension trackers if they exist
+        const extEkspor = form.querySelector('#file_ext_ekspor');
+        const extImpor = form.querySelector('#file_ext_impor');
+        if (extEkspor) sessionStorage.setItem('saved_file_ext_ekspor', extEkspor.value);
+        if (extImpor) sessionStorage.setItem('saved_file_ext_impor', extImpor.value);
+
         const pollInterval = setInterval(async () => {
             try {
                 const res = await fetch(`/dia-brs/upload-progress/${taskId}`);
@@ -106,18 +148,38 @@ function handleUploadWithProgress(formId, btnId, textId, spinId, progressContain
             clearInterval(pollInterval);
 
             if (response.ok) {
-                // Signal form reset and reload
+                // Signal form reset and reload (Success path stays the same)
                 sessionStorage.setItem('reset_upload_form_id', formId);
                 location.reload(); 
             } else {
-                alert('Gagal mengupload file. Silakan cek file Anda dan coba lagi.');
-                location.reload();
+                let errorMsg = 'Gagal mengupload file. Silakan cek file Anda dan coba lagi.';
+                try {
+                    const data = await response.json();
+                    if (data && data.message) {
+                        errorMsg = '🔴 GAGAL: ' + data.message;
+                    }
+                } catch (e) {
+                    console.warn('Could not parse error JSON:', e);
+                }
+                
+                alert(errorMsg);
+
+                // RESTORE UI - No reload so the file stays selected!
+                if (btn) btn.disabled = false;
+                if (text) text.classList.remove('d-none');
+                if (spin) spin.classList.add('d-none');
+                if (progressContainer) progressContainer.classList.add('d-none');
             }
         } catch (err) {
             if (typeof pollInterval !== 'undefined') clearInterval(pollInterval);
             console.error('Upload error:', err);
             alert('Terjadi kesalahan koneksi saat mengupload.');
-            location.reload();
+            
+            // RESTORE UI even on connection error
+            if (btn) btn.disabled = false;
+            if (text) text.classList.remove('d-none');
+            if (spin) spin.classList.add('d-none');
+            if (progressContainer) progressContainer.classList.add('d-none');
         }
     });
 }

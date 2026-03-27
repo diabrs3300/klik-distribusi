@@ -63,7 +63,37 @@ def _validate_basic_upload(bulan, tahun, file, required_ext='.xlsx'):
     
     return errors
 
-def _read_uploaded_file(file, config_key=None, header=0):
+def _find_header_row(file, required_cols):
+    """
+    Mencari baris header di Excel dengan mencocokkan required_cols.
+    Mengembalikan index baris (0-indexed). Default 0 jika tidak ditemukan.
+    """
+    import pandas as pd
+    try:
+        # Intip 20 baris pertama
+        df_peek = pd.read_excel(file, header=None, nrows=20, dtype=str).fillna('')
+        file.seek(0) # Reset pointer
+        
+        # Bersihkan target kolom (strip & lowercase)
+        targets = set(str(c).strip().lower() for c in required_cols)
+        
+        for idx, row in df_peek.iterrows():
+            # Ambil semua nilai dalam baris ini yang tidak kosong
+            row_set = set(str(val).strip().lower() for val in row.values if str(val).strip())
+            
+            # Jika semua kolom wajib ada di baris ini
+            if targets.issubset(row_set):
+                _log.info(f"Header ditemukan di baris ke-{idx+1}")
+                return idx
+        
+        _log.warning("Header tidak ditemukan secara otomatis, menggunakan baris default (0/1).")
+        return 0
+    except Exception as e:
+        _log.error(f"Gagal deteksi header: {e}")
+        file.seek(0)
+        return 0
+
+def _read_uploaded_file(file, config_key=None, header=None, required_cols=None):
     """Read uploaded Excel or DBF file and return DataFrame."""
     import pandas as pd
     import os
@@ -71,7 +101,15 @@ def _read_uploaded_file(file, config_key=None, header=0):
     
     filename = file.filename.lower()
     if filename.endswith('.xlsx') or filename.endswith('.xls'):
-        return pd.read_excel(file, header=header, dtype=str).fillna('')
+        # Jika header None dan ada required_cols, deteksi otomatis
+        if header is None and required_cols:
+            header = _find_header_row(file, required_cols)
+        elif header is None:
+            header = 0
+            
+        df = pd.read_excel(file, header=header, dtype=str).fillna('')
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
     
     if filename.endswith('.dbf'):
         from dbfread import DBF
@@ -106,10 +144,8 @@ def _generate_excel_template(config_key, download_name, title_text=None):
     )
     
     if isinstance(cols_dict, dict):
-        if config_key in ('ekspor', 'impor'):
-            cols = list(cols_dict.values())
-        else:
-            cols = list(cols_dict.keys())
+        # All configs now: SemanticKey → Excel col name, so use .values() for header
+        cols = list(cols_dict.values())
     else:
         cols = cols_dict
         
@@ -143,7 +179,18 @@ def _generate_excel_template(config_key, download_name, title_text=None):
     hfont = Font(bold=True, color='FFFFFF', size=10)
     hbord = Border(bottom=Side(style='medium'), right=Side(style='thin', color='CCCCCC'))
     
+    # Track columns for specific formatting
+    numeric_cols = []
+    text_cols = []
     for i, col in enumerate(cols, start=1):
+        # Numeric columns that shouldn't show scientific notation (E+)
+        if col in ('NK', 'FOB', 'NILAI', 'Nilai', 'IHK', 'TPK', 'RATS'):
+            numeric_cols.append(i)
+        
+        # Identity/Code columns that should preserve leading zeros
+        if col in ('Kode Kota', 'Kode Komoditas', 'Kode', 'Kd.Kota', 'KODE_HS', 'KODE BTKI', 'HS Code', 'HS'):
+            text_cols.append(i)
+        
         cell = ws.cell(row=start_row, column=i, value=col)
         cell.font, cell.fill, cell.border = hfont, hfill, hbord
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -151,7 +198,14 @@ def _generate_excel_template(config_key, download_name, title_text=None):
     
     ws.row_dimensions[start_row].height = 30
 
-    # Sample data
+    # Apply formatting to data rows (Sample + Next 100 rows for easier manual entry)
+    for r in range(start_row + 1, start_row + 102):
+        for i in numeric_cols:
+            ws.cell(row=r, column=i).number_format = '0.00'
+        for i in text_cols:
+            ws.cell(row=r, column=i).number_format = '@'
+
+    # Insert sample data
     if sample:
         data_row = start_row + 1
         for i, val in enumerate(sample, start=1):
@@ -265,46 +319,77 @@ def brs_pariwisata():
 def upload_progress(task_id):
     return jsonify(get_progress(task_id))
 
+def _handle_upload_error(msg, template, title, **kwargs):
+    """Helper to handle upload errors consistently for regular and AJAX requests."""
+    flash(msg, 'danger')
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'status': 'error', 'message': msg}), 400
+    
+    # Ensure docs are passed back for templates that use them
+    if 'docs' not in kwargs:
+        from app.services.sheets import get_docs
+        if 'ihk' in template:
+            kwargs['docs'] = get_docs('IHK', fallback=[])
+        elif 'ekspor_impor' in template:
+            kwargs['docs'] = get_docs('Ekspor Impor', fallback=[])
+            
+    return render_template(template, title=title, **kwargs), 400
+
 @main.route('/dia-brs/ihk/upload', methods=['GET', 'POST'])
 @login_required
 @_require_akses('akses_ihk')
 def upload_ihk():
     if request.method == 'GET':
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        docs = get_docs('IHK', fallback=[])
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi', docs=docs)
 
     params = _get_upload_params(request.form)
     file = request.files.get('file')
     
     errors = _validate_basic_upload(params['bulan'], params['tahun'], file)
     if errors:
-        for e in errors: flash(e, 'danger')
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return _handle_upload_error(". ".join(errors), 'brs/upload_ihk.html', 'Upload Excel IHK/Inflasi')
 
     # ── Baca Excel ────────────────────────────────────────────────────────────
     try:
-        df = _read_uploaded_file(file, header=2)
+        df = _read_uploaded_file(file, required_cols=BRS_CONFIG['ihk']['required_cols'].values())
     except Exception as e:
-        flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return _handle_upload_error(f'Gagal membaca file Excel: {e}', 'brs/upload_ihk.html', 'Upload Excel IHK/Inflasi')
 
-    # ── Validasi kolom Excel ──────────────────────────────────────────────────
-    missing_cols = [c for c in BRS_CONFIG['ihk']['required_cols'] if c not in df.columns]
+    # Build cols_map: config default + user overrides
+    cols_map = dict(BRS_CONFIG['ihk']['required_cols'])
+    for sem_key in list(cols_map.keys()):
+        user_col = request.form.get(f'col_map[{sem_key}]', '').strip()
+        if user_col:
+            cols_map[sem_key] = user_col
+
+    # Case-insensitive robust rename: map actual columns (upper-stripped) to SemanticKey
+    rename_map = {v.strip().upper(): k for k, v in cols_map.items()}
+    df = df.rename(columns={c: rename_map.get(c.upper(), c) for c in df.columns})
+
+    # ── Validasi kolom SemanticKey ────────────────────────────────────────────
+    missing_cols = [k for k in cols_map if k not in df.columns]
     if missing_cols:
-        flash(f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(missing_cols)}', 'danger')
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        excel_names = [cols_map[k] for k in missing_cols]
+        msg = f'Kolom Excel tidak lengkap. Kolom yang kurang: {", ".join(excel_names)}'
+        return _handle_upload_error(msg, 'brs/upload_ihk.html', 'Upload Excel IHK/Inflasi')
 
     if df.empty:
         flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK-Inflasi')
+        return render_template('brs/upload_ihk.html', title='Upload Excel IHK-Inflasi'), 400
 
     # ── Validasi & Filter Bulan/Tahun ─────────────────────────────────────────
     bulan_int, tahun_str = int(params['bulan']), params['tahun']
-    mask = df.apply(lambda r: str(r.get('Tahun', '')).strip() == tahun_str and _safe_int(r.get('Bulan', '')) == bulan_int, axis=1)
+    mask = df.apply(
+        lambda r: str(r.get('KeyTahun', '')).strip() == tahun_str and
+                  _safe_int(r.get('KeyBulan', '')) == bulan_int,
+        axis=1
+    )
     
     matched_df = df[mask]
     if matched_df.empty:
-        flash(f'Tidak ada data untuk Bulan {params["bulan"]} Tahun {params["tahun"]} di file Excel.', 'danger')
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK-Inflasi')
+        msg = f'Tidak ada data untuk Bulan {params["bulan"]} Tahun {params["tahun"]} di file Excel.'
+        return _handle_upload_error(msg, 'brs/upload_ihk.html', 'Upload Excel IHK-Inflasi')
 
     filter_info = f'Hanya {len(matched_df)} dari {len(df)} baris yang sesuai — baris lain dilewati.' if len(matched_df) < len(df) else None
     col_name = tahun_str[2:] + params['bulan'].zfill(2)
@@ -320,15 +405,10 @@ def upload_ihk():
         if stats['inserted'] == 0 and stats['updated'] == 0:
             flash('File berhasil dibaca, namun tidak ada baris data yang valid untuk di-upload.', 'warning')
     except FileNotFoundError:
-        flash(
-            'File credentials.json tidak ditemukan. '
-            'Letakkan service account key di root project.',
-            'danger'
-        )
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        msg = 'File credentials.json tidak ditemukan. Letakkan service account key di root project.'
+        return _handle_upload_error(msg, 'brs/upload_ihk.html', 'Upload Excel IHK/Inflasi')
     except Exception as e:
-        flash(f'Gagal meng-upload ke Google Sheets: {e}', 'danger')
-        return render_template('brs/upload_ihk.html', title='Upload Excel IHK/Inflasi')
+        return _handle_upload_error(f'Gagal meng-upload ke Google Sheets: {e}', 'brs/upload_ihk.html', 'Upload Excel IHK/Inflasi')
 
     if params['task_id']: clear_progress(params['task_id'])
     
@@ -364,61 +444,77 @@ def download_template_ihk():
 @_require_akses('akses_ekspor_impor')
 def upload_ekspor_impor():
     if request.method == 'GET':
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor')
+        docs = get_docs('Ekspor Impor', fallback=[])
+        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor Impor', docs=docs)
 
     form_type = request.form.get('form_type', '').strip()  # 'ekspor' atau 'impor'
     params = _get_upload_params(request.form)
     file = request.files.get('file')
 
     if form_type not in ('ekspor', 'impor'):
-        flash('Tipe form tidak valid.', 'danger')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor')
+        return _handle_upload_error('Tipe form tidak valid.', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor')
 
     # ── Validasi file ────────────────────────────────────────────────────────
     if not file or file.filename == '':
-        flash('File wajib diunggah.', 'danger')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+        return _handle_upload_error('File wajib diunggah.', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
 
     is_excel = file.filename.lower().endswith(('.xlsx', '.xls'))
     if not is_excel and not file.filename.lower().endswith('.dbf'):
-        flash('File harus berformat .dbf atau .xlsx/.xls', 'danger')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+        return _handle_upload_error('File harus berformat .dbf atau .xlsx/.xls', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
 
     # ── Baca File ────────────────────────────────────────────────────────────
     try:
         df = _read_uploaded_file(file)
-        # Rename based on config
         _config = BRS_CONFIG[form_type]
-        cols_map = _config['required_excel_cols'] if is_excel else _config['required_dbf_cols']
-        rename_map = {v.upper(): k for k, v in cols_map.items()}
-        df = df.rename(columns=rename_map)
+
+        if is_excel:
+            # Build cols_map: start from config defaults, override with user-supplied col names
+            cols_map = dict(_config['required_excel_cols'])
+            for sem_key in list(cols_map.keys()):
+                user_col = request.form.get(f'col_map[{sem_key}]', '').strip()
+                if user_col:
+                    cols_map[sem_key] = user_col
+            rename_map = {v.strip().upper(): k for k, v in cols_map.items()}
+        else:
+            # Build cols_map: start from config defaults, override with user-supplied col names
+            cols_map = dict(_config['required_dbf_cols'])
+            for sem_key in list(cols_map.keys()):
+                user_col = request.form.get(f'col_map[{sem_key}]', '').strip()
+                if user_col:
+                    cols_map[sem_key] = user_col
+            rename_map = {v.strip().upper(): k for k, v in cols_map.items()}
+
+        # Robust case-insensitive rename
+        df = df.rename(columns={c: rename_map.get(c.upper(), c) for c in df.columns})
 
         if form_type == 'impor' and not is_excel:
             if not params['bulan'] or not params['tahun']:
-                flash('Bulan dan Tahun wajib diisi untuk upload DBF Impor.', 'danger')
-                return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+                return _handle_upload_error('Bulan dan Tahun wajib diisi untuk upload DBF Impor.', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
             df['KeyTahun'], df['KeyBulan'] = params['tahun'], params['bulan'].zfill(2)
-            val_col = f"N{params['bulan'].zfill(2)}{params['tahun'][-2:]}"
-            if val_col not in df.columns:
-                flash(f'Kolom DBF Impor tidak lengkap. Kolom yang kurang: {val_col}', 'danger')
-                return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
-            df = df.rename(columns={val_col: 'KeyNilai'})
-            cols_map['KeyNilai'] = val_col
+            
+            # User can override the value column name for impor DBF too
+            default_val_col = f"N{params['bulan'].zfill(2)}{params['tahun'][-2:]}"
+            user_val_col = request.form.get('col_map[KeyNilai]', '').strip().upper() or default_val_col.upper()
+            # Find match in actual df columns (case-insensitive)
+            matched_val_col = next((c for c in df.columns if c.upper() == user_val_col), None)
+            if not matched_val_col:
+                msg = f'Kolom nilai DBF Impor tidak ditemukan: "{user_val_col}". Pastikan nama kolom sudah benar.'
+                return _handle_upload_error(msg, 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
+            df = df.rename(columns={matched_val_col: 'KeyNilai'})
+            cols_map['KeyNilai'] = matched_val_col
 
     except Exception as e:
-        flash(f'Gagal membaca file: {e}', 'danger')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+        return _handle_upload_error(f'Gagal membaca file: {e}', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
 
     # ── Validasi & Upload ────────────────────────────────────────────────────
     missing_semantic = [c for c in _config['required_dbf_cols'].keys() if c not in df.columns]
     if missing_semantic:
         missing_real = [cols_map.get(c, c) for c in missing_semantic]
-        flash(f'Kolom tidak lengkap. Kurang: {", ".join(missing_real)}', 'danger')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+        msg = f'Kolom tidak lengkap. Kurang: {", ".join(missing_real)}'
+        return _handle_upload_error(msg, 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
 
     if df.empty:
-        flash('File tidak memiliki data.', 'warning')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+        return _handle_upload_error('File tidak memiliki data.', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
 
     from app.services.sheets import set_progress
     if params['task_id']:
@@ -428,8 +524,7 @@ def upload_ekspor_impor():
         if form_type == 'ekspor': stats = process_ekspor_upload(df, task_id=params['task_id'])
         else: stats = process_impor_upload(df, task_id=params['task_id'])
     except Exception as e:
-        flash(f'Gagal upload ke Google Sheets: {e}', 'danger')
-        return render_template('brs/upload_ekspor_impor.html', title='Upload Ekspor-Impor', active_tab=form_type)
+        return _handle_upload_error(f'Gagal upload ke Google Sheets: {e}', 'brs/upload_ekspor_impor.html', 'Upload Ekspor-Impor', active_tab=form_type)
         
     if params['task_id']: clear_progress(params['task_id'])
     
@@ -466,21 +561,31 @@ def download_template_impor():
 @_require_akses('akses_ntp')
 def upload_ntp():
     if request.method == 'GET':
-        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
+        docs = get_docs('NTP', fallback=[])
+        return render_template('brs/upload_ntp.html', title='Upload Excel NTP', docs=docs)
 
     params = _get_upload_params(request.form)
     file = request.files.get('file')
     
     errors = _validate_basic_upload(params['bulan'], params['tahun'], file)
     if errors:
-        for e in errors: flash(e, 'danger')
-        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
+        return _handle_upload_error(". ".join(errors), 'brs/upload_ntp.html', 'Upload Excel NTP')
 
     try:
-        df = _read_uploaded_file(file, header=2)
+        df = _read_uploaded_file(file, required_cols=BRS_CONFIG['ntp']['required_cols'].values())
     except Exception as e:
-        flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
+        return _handle_upload_error(f'Gagal membaca file Excel: {e}', 'brs/upload_ntp.html', 'Upload Excel NTP')
+
+    # Build cols_map: config default + user overrides
+    cols_map = dict(BRS_CONFIG['ntp']['required_cols'])
+    for sem_key in list(cols_map.keys()):
+        user_col = request.form.get(f'col_map[{sem_key}]', '').strip()
+        if user_col:
+            cols_map[sem_key] = user_col
+
+    # Case-insensitive robust rename
+    rename_map = {v.strip().upper(): k for k, v in cols_map.items()}
+    df = df.rename(columns={c: rename_map.get(c.upper(), c) for c in df.columns})
 
     missing = [c for c in BRS_CONFIG['ntp']['required_cols'] if c not in df.columns]
     if missing:
@@ -501,7 +606,8 @@ def upload_ntp():
         set_progress(params['task_id'], 100, "Validasi selesai (Fitur GSheets segera hadir)")
 
     flash('File berhasil dibaca. Fitur upload NTP ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('brs/upload_ntp.html', title='Upload Excel NTP')
+    docs = get_docs('NTP', fallback=[])
+    return render_template('brs/upload_ntp.html', title='Upload Excel NTP', docs=docs)
 
 
 @main.route('/dia-brs/ntp/template')
@@ -518,30 +624,38 @@ def download_template_ntp():
 @_require_akses('akses_pariwisata')
 def upload_pariwisata():
     if request.method == 'GET':
-        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
+        docs = get_docs('Pariwisata', fallback=[])
+        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata', docs=docs)
 
     params = _get_upload_params(request.form)
     file = request.files.get('file')
     
     errors = _validate_basic_upload(params['bulan'], params['tahun'], file)
     if errors:
-        for e in errors: flash(e, 'danger')
-        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return _handle_upload_error(". ".join(errors), 'brs/upload_pariwisata.html', 'Upload Excel Pariwisata')
 
     try:
-        df = _read_uploaded_file(file, header=2)
+        df = _read_uploaded_file(file, required_cols=BRS_CONFIG['pariwisata']['required_cols'].values())
     except Exception as e:
-        flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return _handle_upload_error(f'Gagal membaca file Excel: {e}', 'brs/upload_pariwisata.html', 'Upload Excel Pariwisata')
+
+    # Build cols_map
+    cols_map = dict(BRS_CONFIG['pariwisata']['required_cols'])
+    for sem_key in list(cols_map.keys()):
+        user_col = request.form.get(f'col_map[{sem_key}]', '').strip()
+        if user_col:
+            cols_map[sem_key] = user_col
+
+    rename_map = {v.strip().upper(): k for k, v in cols_map.items()}
+    df = df.rename(columns={c: rename_map.get(c.upper(), c) for c in df.columns})
 
     missing = [c for c in BRS_CONFIG['pariwisata']['required_cols'] if c not in df.columns]
     if missing:
-        flash(f'Kolom Excel tidak lengkap. Kurang: {", ".join(missing)}', 'danger')
-        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
+        msg = f'Kolom Excel tidak lengkap. Kurang: {", ".join(missing)}'
+        return _handle_upload_error(msg, 'brs/upload_pariwisata.html', 'Upload Excel Pariwisata')
 
     if df.empty:
-        flash('File Excel tidak memiliki data.', 'warning')
-        return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
+        return _handle_upload_error('File Excel tidak memiliki data.', 'brs/upload_pariwisata.html', 'Upload Excel Pariwisata')
 
     # AJAX support for smooth reload + form reset
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -553,7 +667,8 @@ def upload_pariwisata():
         set_progress(params['task_id'], 100, "Validasi selesai (Fitur GSheets segera hadir)")
 
     flash('File berhasil dibaca. Fitur upload Pariwisata ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata')
+    docs = get_docs('Pariwisata', fallback=[])
+    return render_template('brs/upload_pariwisata.html', title='Upload Excel Pariwisata', docs=docs)
 
 
 @main.route('/dia-brs/pariwisata/template')
@@ -570,7 +685,8 @@ def download_template_pariwisata():
 @_require_akses('akses_transportasi')
 def upload_transportasi():
     if request.method == 'GET':
-        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
+        docs = get_docs('Transportasi', fallback=[])
+        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi', docs=docs)
 
     params = _get_upload_params(request.form)
     file = request.files.get('file')
@@ -581,10 +697,19 @@ def upload_transportasi():
         return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
 
     try:
-        df = _read_uploaded_file(file, header=2)
+        df = _read_uploaded_file(file, required_cols=BRS_CONFIG['transportasi']['required_cols'].values())
     except Exception as e:
-        flash(f'Gagal membaca file Excel: {e}', 'danger')
-        return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
+        return _handle_upload_error(f'Gagal membaca file Excel: {e}', 'brs/upload_transportasi.html', 'Upload Excel Transportasi')
+
+    # Build cols_map
+    cols_map = dict(BRS_CONFIG['transportasi']['required_cols'])
+    for sem_key in list(cols_map.keys()):
+        user_col = request.form.get(f'col_map[{sem_key}]', '').strip()
+        if user_col:
+            cols_map[sem_key] = user_col
+
+    rename_map = {v.strip().upper(): k for k, v in cols_map.items()}
+    df = df.rename(columns={c: rename_map.get(c.upper(), c) for c in df.columns})
 
     missing = [c for c in BRS_CONFIG['transportasi']['required_cols'] if c not in df.columns]
     if missing:
@@ -605,7 +730,8 @@ def upload_transportasi():
         set_progress(params['task_id'], 100, "Validasi selesai (Fitur GSheets segera hadir)")
 
     flash('File berhasil dibaca. Fitur upload Transportasi ke Google Sheets sedang dalam pengembangan.', 'info')
-    return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi')
+    docs = get_docs('Transportasi', fallback=[])
+    return render_template('brs/upload_transportasi.html', title='Upload Excel Transportasi', docs=docs)
 
 
 @main.route('/dia-brs/transportasi/template')

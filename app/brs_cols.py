@@ -12,26 +12,34 @@ BRS_CONFIG = {
     # ─── IHK - Inflasi ────────────────────────────────────────────────────────
     'ihk': {
         'theme_color': '0D6EFD',  # Blue
-        'keys': ['Kode Kota', 'Kode Komoditas'],
+        'keys': ['KeyKodeKota', 'KeyKodeKomoditas'],
+        # SemanticKey → nama kolom default di Excel (bisa di-override user)
         'required_cols': {
-            # {nama kolom Excel : nama kolom di Google Sheets}
-            'Tahun':          'Tahun',
-            'Bulan':          'Bulan',
-            'Kode Kota':      'Kd.Kota',
-            'Kode Komoditas': 'Kode',
-            'NK':             'NK',
-            'IHK':            'IHK',
-            'Inflasi MtM':    'MTM',
-            'Inflasi YtD':    'YTD',
-            'Inflasi YoY':    'YOY',
-            'Andil MtM':      'AMTM',
-            'Andil YtD':      'AYTD',
-            'Andil YoY':      'AYOY',
+            'KeyTahun':         'Tahun',
+            'KeyBulan':         'Bulan',
+            'KeyKodeKota':      'Kode Kota',
+            'KeyKodeKomoditas': 'Kode Komoditas',
+            'KeyNK':            'NK',
+            'KeyIHK':           'IHK',
+            'KeyInflasiMtM':    'Inflasi MtM',
+            'KeyInflasiYtD':    'Inflasi YtD',
+            'KeyInflasiYoY':    'Inflasi YoY',
+            'KeyAndilMtM':      'Andil MtM',
+            'KeyAndilYtD':      'Andil YtD',
+            'KeyAndilYoY':      'Andil YoY',
         },
-        'optional_cols': {
-            'Nama Kota':      'Nama Kota',
-            'Nama Komoditas': 'Nama Komoditas',
-            'Flag':           'Flag',
+        # SemanticKey → nama kolom di Google Sheets (fixed, tidak berubah)
+        'mapping_cols': {
+            'KeyKodeKota':      'Kd.Kota',
+            'KeyKodeKomoditas': 'Kode',
+            'KeyNK':            'NK',
+            'KeyIHK':           'IHK',
+            'KeyInflasiMtM':    'MTM',
+            'KeyInflasiYtD':    'YTD',
+            'KeyInflasiYoY':    'YOY',
+            'KeyAndilMtM':      'AMTM',
+            'KeyAndilYtD':      'AYTD',
+            'KeyAndilYoY':      'AYOY',
         },
         'sheets': ['IHK', 'NK', 'MTM', 'YTD', 'YOY', 'AMTM', 'AYTD', 'AYOY'],
         'template': {
@@ -59,7 +67,7 @@ BRS_CONFIG = {
         'required_dbf_cols': {
             'KeyBulan':     'MTH',
             'KeyTahun':     'YEAR',
-            'KeyPelabuhan': 'PODAL5',
+            'KeyPelabuhan': 'PELABUHAN',
             'KeyKodeHS':    'KODE_HS',
             'KeyNegara':    'NEWCTRYCOD',
             'KeyNilai':     'FOB',
@@ -106,15 +114,21 @@ BRS_CONFIG = {
     'ntp': {
         'theme_color': '198754',  # Green
         'required_cols': {
-            'Tahun': 'Tahun', 'Bulan': 'Bulan',
-            'Kode Provinsi': 'Kd.Prov', 'Nama Provinsi': 'Nama Prov',
-            'NTP': 'NTP', 'NTPP': 'NTPP', 'NTPH': 'NTPH',
-            'NTPN': 'NTPN', 'NTPF': 'NTPF', 'NTPE': 'NTPE',
+            'KeyTahun': 'Tahun', 
+            'KeyBulan': 'Bulan',
+            'KeyKdProv': 'Kd.Prov', 
+            'KeyNamaProv': 'Nama Prov',
+            'KeyNTP': 'NTP', 
+            'KeyNTPP': 'NTPP', 
+            'KeyNTPH': 'NTPH',
+            'KeyNTPN': 'NTPN', 
+            'KeyNTPF': 'NTPF', 
+            'KeyNTPE': 'NTPE',
         },
         'sheets': ['NTP', 'NTPP', 'NTPH', 'NTPN', 'NTPF', 'NTPE'],
         'template': {
             'sample': ['2026', '8', '33', 'JAWA TENGAH', '105.12', '102.30', '107.50', '103.00', '108.20', '104.10'],
-            'col_widths': [14] * 10,
+            'col_widths': [8, 7, 10, 15, 10, 10, 10, 10, 10, 10],
         },
     },
 
@@ -122,15 +136,19 @@ BRS_CONFIG = {
     'pariwisata': {
         'theme_color': '7C3AED',  # Purple
         'required_cols': {
-            'Tahun': 'Tahun', 'Bulan': 'Bulan',
-            'Nama Hotel': 'Nama Hotel', 'Kelas Hotel': 'Kelas Hotel',
-            'TPK': 'TPK', 'RATS': 'RATS',
-            'Tamu Asing': 'Tamu Asing', 'Tamu Domestik': 'Tamu Domestik',
+            'KeyTahun': 'Tahun', 
+            'KeyBulan': 'Bulan',
+            'KeyNamaHotel': 'Nama Hotel', 
+            'KeyKelasHotel': 'Kelas Hotel',
+            'KeyTPK': 'TPK', 
+            'KeyRATS': 'RATS',
+            'KeyTamuAsing': 'Tamu Asing', 
+            'KeyTamuDomestik': 'Tamu Domestik',
         },
         'sheets': ['TPK', 'RATS', 'Tamu'],
         'template': {
             'sample': ['2026', '8', 'Grand Artos', 'Bintang 4', '62.50', '2.10', '120', '850'],
-            'col_widths': [16] * 8,
+            'col_widths': [8, 7, 18, 14, 10, 10, 14, 14],
         },
     },
 
@@ -138,16 +156,19 @@ BRS_CONFIG = {
     'transportasi': {
         'theme_color': 'D97706',  # Orange
         'required_cols': {
-            'Tahun': 'Tahun', 'Bulan': 'Bulan',
-            'Moda': 'Moda', 'Nama Perusahaan': 'Nama Perusahaan',
-            'Penumpang Berangkat': 'Penumpang Berangkat',
-            'Penumpang Datang': 'Penumpang Datang',
-            'Barang Muat': 'Barang Muat', 'Barang Bongkar': 'Barang Bongkar',
+            'KeyTahun': 'Tahun', 
+            'KeyBulan': 'Bulan',
+            'KeyModa': 'Moda', 
+            'KeyNamaPerusahaan': 'Nama Perusahaan',
+            'KeyPenumpangBerangkat': 'Penumpang Berangkat',
+            'KeyPenumpangDatang': 'Penumpang Datang',
+            'KeyBarangMuat': 'Barang Muat', 
+            'KeyBarangBongkar': 'Barang Bongkar',
         },
         'sheets': ['Udara', 'Laut', 'KA', 'ASDP'],
         'template': {
             'sample': ['2026', '8', 'Udara', 'Garuda Indonesia', '12500', '11800', '850.50', '920.30'],
-            'col_widths': [18] * 8,
+            'col_widths': [8, 7, 12, 18, 18, 18, 18, 18],
         },
     },
 }

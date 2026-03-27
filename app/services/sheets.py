@@ -76,9 +76,18 @@ def _get_cached_data(cache_key: str, fetch_func, sub_key: str = None):
 # Spreadsheet IDs are now in app.constants
 
 # ─── KUSTOMISASI IHK MAPPING ──────────────────────────────────────────────────
-# Mapping dari BRS_CONFIG
-SHEET_VALUE_MAP = {k: v for k, v in BRS_CONFIG['ihk']['required_cols'].items() if v in BRS_CONFIG['ihk']['sheets']}
-FIXED_COLS = [v for k, v in BRS_CONFIG['ihk']['required_cols'].items() if v not in BRS_CONFIG['ihk']['sheets'] and k not in ('Tahun', 'Bulan')] + list(BRS_CONFIG['ihk']['optional_cols'].values())
+# SemanticKey → nama sheet GSheets (untuk keys yang nilai mapping_cols-nya ada di sheets)
+SHEET_VALUE_MAP = {
+    sem_key: gsh_col
+    for sem_key, gsh_col in BRS_CONFIG['ihk']['mapping_cols'].items()
+    if gsh_col in BRS_CONFIG['ihk']['sheets']
+}
+# Nama kolom GSheets yang bukan sheet value (kolom tetap di setiap sheet)
+FIXED_COLS = [
+    gsh_col for gsh_col in BRS_CONFIG['ihk']['mapping_cols'].values()
+    if gsh_col not in BRS_CONFIG['ihk']['sheets']
+]
+
 
 CREDS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'credentials.json')
 SCOPES = [
@@ -443,25 +452,24 @@ def _build_row_lookup(data_rows: list[list[str]], col_indices: dict[str, int]) -
 def _create_ihk_row(row, col_indices, row_width, val_col_idx, cell_value):
     """Helper to build a single IHK data row based on BRS_CONFIG mapping."""
     row_data = [''] * row_width
-    kd_cola = BRS_CONFIG['ihk']['keys'][0]
-    kd_colb = BRS_CONFIG['ihk']['keys'][1]
+    kd_cola = BRS_CONFIG['ihk']['keys'][0]  # SemanticKey, e.g. 'KeyKodeKota'
+    kd_colb = BRS_CONFIG['ihk']['keys'][1]  # SemanticKey, e.g. 'KeyKodeKomoditas'
+    mapping = BRS_CONFIG['ihk']['mapping_cols']
     
-    def _set(col_key, val):
-        idx = col_indices.get(col_key)
+    def _set(gsh_col, val):
+        idx = col_indices.get(gsh_col)
         if idx is not None and idx < row_width:
             row_data[idx] = val
 
-    # Set required columns
-    _set(BRS_CONFIG['ihk']['required_cols'][kd_cola], str(row.get(kd_cola, '')).strip())
-    _set(BRS_CONFIG['ihk']['required_cols'][kd_colb], str(row.get(kd_colb, '')).strip())
+    # Set identity columns (Kd.Kota, Kode)
+    _set(mapping[kd_cola], str(row.get(kd_cola, '')).strip())
+    _set(mapping[kd_colb], str(row.get(kd_colb, '')).strip())
     
-    # Set other fixed and optional columns
-    for ex_col, sh_col in BRS_CONFIG['ihk']['required_cols'].items():
-        if sh_col in FIXED_COLS and ex_col not in BRS_CONFIG['ihk']['keys'] and ex_col not in ('Tahun', 'Bulan'):
-            _set(sh_col, str(row.get(ex_col, '')).strip())
-            
-    for ex_col, sh_col in BRS_CONFIG['ihk']['optional_cols'].items():
-        _set(sh_col, str(row.get(ex_col, '')).strip())
+    # Set other fixed columns (not identity, not Tahun/Bulan, not sheet-value cols)
+    skip_keys = {kd_cola, kd_colb, 'KeyTahun', 'KeyBulan'}
+    for sem_key, gsh_col in mapping.items():
+        if gsh_col in FIXED_COLS and sem_key not in skip_keys:
+            _set(gsh_col, str(row.get(sem_key, '')).strip())
     
     # Set the actual value for the current period
     if val_col_idx < row_width:
@@ -469,8 +477,8 @@ def _create_ihk_row(row, col_indices, row_width, val_col_idx, cell_value):
         
     return row_data
 
-def _upsert_ihk_sheet(worksheet: gspread.Worksheet, dataframe, col_name: str, excel_col_name: str) -> tuple[int, int]:
-    """Insert/update data dari DataFrame ke worksheet IHK."""
+def _upsert_ihk_sheet(worksheet: gspread.Worksheet, dataframe, col_name: str, sem_key: str) -> tuple[int, int]:
+    """Insert/update data dari DataFrame ke worksheet IHK. sem_key adalah SemanticKey kolom nilai (misal 'KeyNK')."""
     all_values = worksheet.get_all_values()
     header_row = all_values[2] if len(all_values) > 2 else []
     col_indices = {name: _col_index(header_row, name) for name in FIXED_COLS}
@@ -498,12 +506,12 @@ def _upsert_ihk_sheet(worksheet: gspread.Worksheet, dataframe, col_name: str, ex
     max_col_0 = max((v for v in col_indices.values() if v is not None), default=0)
     row_width = max(max_col_0, val_col_idx) + 1
 
-    kd_cola, kd_colb = BRS_CONFIG['ihk']['keys']
+    kd_cola, kd_colb = BRS_CONFIG['ihk']['keys']  # SemanticKeys
     
     for _, row in dataframe.iterrows():
         kd_kota = str(row.get(kd_cola, '')).strip()
         kd_komo = str(row.get(kd_colb, '')).strip()
-        cell_value = _to_number(row.get(excel_col_name, ''))
+        cell_value = _to_number(row.get(sem_key, ''))  # SemanticKey untuk nilai
         key = (kd_kota, kd_komo)
 
         if key in lookup:
@@ -545,14 +553,14 @@ def process_ihk_upload(dataframe, col_name: str, task_id: str = None) -> dict:
     num_sheets = len(SHEET_VALUE_MAP)
     set_progress(task_id, 20, f"Mempersiapkan {num_sheets} sheet...")
 
-    for idx, (ex_col, sh_name) in enumerate(SHEET_VALUE_MAP.items(), 1):
+    for idx, (sem_key, sh_name) in enumerate(SHEET_VALUE_MAP.items(), 1):
         pct = 20 + int(80 * (idx - 1) / num_sheets)
         set_progress(task_id, pct, f"Memproses sheet '{sh_name}' ({idx}/{num_sheets})...")
         
         worksheet = spreadsheet.worksheet(sh_name)
         # Handle quota limits with retry
         func = _retry_on_429(_upsert_ihk_sheet)
-        ins, upd = func(worksheet, dataframe, col_name, ex_col, _task_id=task_id)
+        ins, upd = func(worksheet, dataframe, col_name, sem_key, _task_id=task_id)
         
         total_inserted += ins
         total_updated  += upd

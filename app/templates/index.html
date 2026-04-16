@@ -304,18 +304,21 @@
                 </div>
 
                 {# Pisahkan link baru (Tahun ini/depan/kosong) dan link lama #}
-                {% set recent_links = [] %}
+                {% set recent_no_year = [] %}
+                {% set recent_with_year = [] %}
                 {% set old_links = [] %}
                 {% for item in group.links %}
-                    {% if not item.tahun or item.tahun >= current_year %}
-                        {% do recent_links.append(item) %}
+                    {% if not item.tahun %}
+                        {% do recent_no_year.append(item) %}
+                    {% elif item.tahun >= current_year %}
+                        {% do recent_with_year.append(item) %}
                     {% else %}
                         {% do old_links.append(item) %}
                     {% endif %}
                 {% endfor %}
 
                 {# Sort recent links by year descending, but items with No Year stay on top #}
-                {% set sorted_recent = recent_links | sort(attribute='tahun', reverse=True) %}
+                {% set sorted_recent = recent_no_year + (recent_with_year | sort(attribute='tahun', reverse=True)) %}
                 
                 <!-- Recent Links Grid -->
                 <div class="row g-2">
